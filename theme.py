@@ -109,6 +109,19 @@ SEG_BAR   = 8         # ancho de la marca de un escritorio no activo
 SEG_H     = 6         # grosor de ocupado
 SEG_H_OFF = 4         # grosor de vacio
 
+# Animar o no el salto de la pildora al cambiar de escritorio.
+#
+# A False la pildora ya esta colocada cuando el notch acaba de bajar.
+# El cambio de escritorio lo decides tu y lo acabas de pulsar: no hay
+# nada que anunciar, y ver la pildora cruzando por encima de los
+# escritorios de en medio distrae mas de lo que informa. El despliegue
+# del notch ya es aviso de sobra.
+#
+# A True vuelve a deslizarse con muelle (ver SP_WS_* mas abajo).
+WS_ANIM   = False
+SP_WS_RESP = 0.32     # periodo del muelle, si WS_ANIM esta a True
+SP_WS_DAMP = 0.82
+
 # Altura de ventana: tiene que caber el panel MAS ALTO, que ahora es el
 # lanzador (campo de busqueda + cinco filas de 54px = ~426px), no la
 # lista de wifi. Con 460 el lanzador salia cortado por abajo.

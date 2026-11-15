@@ -54,7 +54,7 @@ física.
 ## Qué hace
 
 <p align="center">
-  <img src="docs/workspaces.gif" alt="Al cambiar de escritorio el notch baja solo, la píldora azul se desliza hasta el escritorio nuevo y el notch vuelve a replegarse" width="760">
+  <img src="docs/workspaces.gif" alt="Al cambiar de escritorio el notch baja solo, con la píldora azul ya colocada en el escritorio nuevo, y vuelve a replegarse" width="760">
 </p>
 
 **Se repliega.** `top_padding` a 0: las ventanas usan la pantalla entera y el
@@ -62,9 +62,14 @@ notch deja asomar 3 píxeles. Baja al acercar el ratón al borde superior, y
 también solo cuando hay algo que enseñar — un cambio de escritorio, una
 notificación, el cargador enchufado.
 
-**Escritorios.** Una pista de segmentos con una píldora que se desliza al
-cambiar. Clic izquierdo salta a ese escritorio; clic derecho abre los ajustes
-del mosaico (monocle, equilibrar, rotar, separación, no molestar).
+**Escritorios.** Una pista de segmentos con la píldora del activo. El salto
+no se anima a propósito: el cambio de escritorio lo acabas de pulsar tú, así
+que no hay nada que anunciar, y ver la píldora cruzando por encima de los
+escritorios de en medio distrae más de lo que informa. El despliegue del notch
+ya es aviso de sobra. Si lo prefieres animado, `WS_ANIM` en `theme.py`.
+
+Clic izquierdo salta a ese escritorio; clic derecho abre los ajustes del
+mosaico (monocle, equilibrar, rotar, separación, no molestar).
 
 <p align="center">
   <img src="docs/notification.gif" alt="Una notificación hace que el notch se despliegue en tarjeta con el icono de la aplicación, el título y el cuerpo, y luego vuelva a replegarse" width="760">

@@ -129,7 +129,7 @@ class Island(Gtk.Window):
         # el mismo instante, el ancho total no varia y el azul parece
         # DESLIZARSE hasta su sitio en vez de saltar.
         # Posicion de la pildora del indicador de escritorios.
-        self.sp_wsx = Spring(0, response=0.32, damping=0.82)
+        self.sp_wsx = Spring(0, response=T.SP_WS_RESP, damping=T.SP_WS_DAMP)
         self.launch = None        # estado del lanzador de aplicaciones
         self.apps = []            # indice de .desktop (se llena en diferido)
         self.wins = []            # ventanas abiertas (se lee al abrir)
@@ -434,8 +434,11 @@ class Island(Gtk.Window):
         estados = [st for _n, st in self.bspwm.desktops]
         destino = self.bspwm.focused * R.WsBar.paso()
         if self.sp_wsx.target != destino:
-            self.sp_wsx.set(destino)
-            self.ensure_tick()
+            if T.WS_ANIM:
+                self.sp_wsx.set(destino)
+                self.ensure_tick()
+            else:
+                self.sp_wsx.snap(destino)
         ws = R.Row([R.WsBar(estados, self.sp_wsx.value)], tag="ws")
         row.add(ws)
 
@@ -1249,7 +1252,7 @@ class Island(Gtk.Window):
 
         if self.activities:
             self._mostrar()
-        if not self.sp_wsx.settled:
+        if T.WS_ANIM and not self.sp_wsx.settled:
             self.ensure_tick()
         self._schedule_expiry()
         self.sp_w.set(target_w)
@@ -1326,7 +1329,7 @@ class Island(Gtk.Window):
         for s in (self.sp_w, self.sp_h, self.sp_fade, self.sp_y,
                   self.sp_hx, self.sp_hy, self.sp_hw, self.sp_hh, self.sp_ha):
             moving |= s.step(dt)
-        if self.sp_wsx.step(dt):
+        if T.WS_ANIM and self.sp_wsx.step(dt):
             moving = True
             # El contenido se construye con el valor del muelle, asi que
             # hay que rehacerlo: no basta con repintar.
