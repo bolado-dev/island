@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="" width="128">
+</p>
+
 <h1 align="center">island</h1>
 
 <p align="center">
