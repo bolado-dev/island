@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Cliente: manda un evento a la isla.
+
+  island-send volume --value 45
+  island-send notify --app Discord --body "nos vemos a las 8"
+  island-send dismiss --target notify
+"""
+import json, os, sys, argparse
+
+FIFO = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island.fifo")
+p = argparse.ArgumentParser()
+p.add_argument("kind")
+for f in ("app", "title", "body", "artist", "urgency", "target", "ip", "icon", "hint"):
+    p.add_argument("--" + f, default=None)
+p.add_argument("--value", type=float, default=None)
+p.add_argument("--ttl", type=float, default=None)
+p.add_argument("--muted", action="store_true")
+p.add_argument("--charging", action="store_true")
+a = p.parse_args()
+
+ev = {k: v for k, v in vars(a).items() if v not in (None, False)}
+if not os.path.exists(FIFO):
+    sys.exit(0)                      # la isla no esta corriendo: no estorbar
+try:
+    fd = os.open(FIFO, os.O_WRONLY | os.O_NONBLOCK)
+    os.write(fd, (json.dumps(ev) + "\n").encode())
+    os.close(fd)
+except OSError:
+    pass                             # sin lector: se descarta en silencio

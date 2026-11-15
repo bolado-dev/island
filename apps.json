@@ -1,0 +1,13 @@
+[
+  {
+    "_comentario": "Reglas para identificar notificaciones web. Chrome las manda TODAS como 'Google Chrome', asi que sin reglas no hay forma de saber de que sitio vienen. 'match' es una expresion regular que se prueba, sin distinguir mayusculas, contra appname + summary + body + urls + stack_tag juntos.",
+    "match": "whatsapp",
+    "name": "WhatsApp",
+    "domain": "web.whatsapp.com"
+  },
+  { "match": "\\bgmail\\b|mail\\.google",      "name": "Gmail",    "domain": "mail.google.com" },
+  { "match": "\\bslack\\b",                    "name": "Slack",    "domain": "slack.com" },
+  { "match": "\\btelegram\\b|web\\.telegram",  "name": "Telegram", "domain": "web.telegram.org" },
+  { "match": "\\bdiscord\\b",                  "name": "Discord",  "domain": "discord.com" },
+  { "match": "google calendar|calendar\\.google", "name": "Calendar", "domain": "calendar.google.com" }
+]

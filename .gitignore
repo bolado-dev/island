@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+
+# Etiqueta opcional de la VPN: es contenido local, no del proyecto.
+vpn-label
+
+# Los SVG de Solar se bajan con fetch-icons.sh; no se versionan para no
+# redistribuir un juego de iconos ajeno dentro del repo.
+icons/

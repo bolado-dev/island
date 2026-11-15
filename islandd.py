@@ -1,0 +1,1739 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Dynamic Island para bspwm.
+
+Una sola ventana transparente a todo el ancho, pegada arriba. Dentro se
+dibuja la capsula con cairo a 60fps. No se redimensiona la ventana X11
+al expandirse: la ventana es siempre igual de grande y lo que cambia es
+el dibujo. Redimensionar una ventana X11 no lo anima el compositor y se
+veria a saltos; dibujando por dentro el control es total.
+"""
+import os
+import sys
+import time
+import math
+import locale
+import calendar
+import datetime
+import gi
+
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+import cairo
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import theme as T
+import render as R
+from spring import Spring
+import sources
+import controls
+import config as C
+
+FIFO = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island.fifo")
+
+# Sin esto, strftime usa la locale C y la fecha saldria "Sun 15 Nov".
+# Con LANG=es_ES.UTF-8 queda "dom 15 nov".
+try:
+    locale.setlocale(locale.LC_TIME, "")
+except locale.Error:
+    pass
+
+
+class Activity(object):
+    """Algo que la isla muestra. 'pill' crece a lo ancho; 'card' crece
+    tambien a lo alto y admite dos lineas."""
+    def __init__(self, kind, prio, ttl, data, mode="pill"):
+        self.kind = kind
+        self.prio = prio
+        self.data = data
+        self.mode = mode
+        self.born = time.monotonic()
+        self.expires = None if ttl is None else self.born + ttl
+
+    def alive(self, now):
+        return self.expires is None or now < self.expires
+
+
+class Island(Gtk.Window):
+
+    def __init__(self):
+        super().__init__(type=Gtk.WindowType.TOPLEVEL)
+
+        geo = Gdk.Display.get_default().get_monitor(0).get_geometry()
+        self.W, self.H = geo.width, T.WIN_H
+
+        self.set_app_paintable(True)
+        self.set_decorated(False)
+        self.set_resizable(False)
+        # DOCK: bspwm no lo gestiona como ventana normal y se queda
+        # encima sin entrar en el mosaico.
+        self.set_type_hint(Gdk.WindowTypeHint.DOCK)
+        self.set_keep_above(True)
+        self.set_accept_focus(False)
+        self.stick()
+        vis = self.get_screen().get_rgba_visual()
+        if vis:
+            self.set_visual(vis)
+        self.set_default_size(self.W, self.H)
+        self.move(geo.x, geo.y)
+
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK
+                        | Gdk.EventMask.BUTTON_RELEASE_MASK
+                        | Gdk.EventMask.POINTER_MOTION_MASK
+                        | Gdk.EventMask.LEAVE_NOTIFY_MASK
+                        | Gdk.EventMask.KEY_PRESS_MASK)
+        self.connect("draw", self.on_draw)
+        self.connect("button-press-event", self.on_click)
+        self.connect("button-release-event", self.on_release)
+        self.connect("motion-notify-event", self.on_motion)
+        self.connect("leave-notify-event", self.on_leave)
+        self.connect("enter-notify-event", lambda *a: self._mostrar())
+        self.connect("key-press-event", self.on_key)
+        self.connect("realize", lambda *a: self.update_input_region())
+
+        # --- animacion -------------------------------------------------
+        # El ancho responde algo mas rapido que el alto: si ambos usan el
+        # mismo periodo la expansion a tarjeta parece que "infla" en vez
+        # de desplegarse.
+        self.sp_w = Spring(600, response=0.42, damping=0.80)
+        self.sp_h = Spring(T.H_COMPACT, response=0.50, damping=0.90)
+        self.sp_fade = Spring(1.0, response=0.26, damping=1.0)
+        self._tick_id = None
+        self._exp_id = None
+        self._last = time.monotonic()
+
+        # --- contenido -------------------------------------------------
+        self.content = None       # (mode, item)
+        self.prev_content = None
+        self.state_key = None
+
+        # --- datos -----------------------------------------------------
+        self.sys = sources.SystemInfo()
+        self.bspwm = sources.Bspwm(self._on_bspwm)
+        self.player = sources.Player(self._on_player)
+        self.activities = {}
+        self.wifi_nets = None
+        self.cal_off = 0          # meses de desplazamiento respecto a hoy
+        self.dnd = False          # dunst en pausa
+        self.oculto = False
+        self._hide_id = None
+        # None hasta el primer informe de bspwm: asi el notch no se
+        # asoma en el arranque, que no es un cambio de escritorio.
+        self._ws_prev = None
+        # Muelle del desplazamiento vertical: 0 = visible, negativo =
+        # replegado hacia arriba.
+        self.sp_y = Spring(0, response=0.34, damping=0.92)
+        # Un muelle de anchura por escritorio. El que deja de estar
+        # activo se encoge mientras el nuevo crece, los dos con los
+        # mismos parametros: como lo que uno pierde lo gana el otro en
+        # el mismo instante, el ancho total no varia y el azul parece
+        # DESLIZARSE hasta su sitio en vez de saltar.
+        # Posicion de la pildora del indicador de escritorios.
+        self.sp_wsx = Spring(0, response=0.32, damping=0.82)
+        self.launch = None        # estado del lanzador de aplicaciones
+        self.apps = []            # indice de .desktop (se llena en diferido)
+        self.wins = []            # ventanas abiertas (se lee al abrir)
+        self._drag = None
+        self._prev_dmg = (0, 0)
+        self.anim = 0.0           # fase 0..1 de las animaciones ciclicas
+        self._was_charging = None # para detectar el flanco de enchufado
+
+        # Realce de hover: en vez de que cada elemento se dibuje distinto
+        # al pasar por encima, hay UN solo rectangulo que se desliza
+        # entre zonas. Asi el cambio de un elemento a otro es continuo
+        # (como el menu de macOS) y no un parpadeo de dos estados.
+        self.hover = None
+        self.pw = None            # estado del campo de contrasena
+        self.known = set()        # perfiles de red ya guardados
+        self.caret_on = True
+        self._blink_id = None
+        self._seat = None          # captura activa (puntero/teclado)
+        self._grab_guard = None
+        # Mas rapidos que los de la isla (0.38-0.50): el hover tiene que
+        # sentirse inmediato, no "animado". Amortiguacion alta para que
+        # no rebote al llegar a la zona.
+        self.sp_hx = Spring(0, response=0.20, damping=0.95)
+        self.sp_hy = Spring(0, response=0.20, damping=0.95)
+        self.sp_hw = Spring(0, response=0.20, damping=0.95)
+        self.sp_hh = Spring(0, response=0.20, damping=0.95)
+        self.sp_ha = Spring(0, response=0.16, damping=1.0)
+        self._cursor_ptr = None
+        self.fifo = sources.Fifo(FIFO, self.on_event)
+
+        # Un unico temporizador de 1 s para reloj y enchufe: dos
+        # separados despertaban el proceso el doble de veces para hacer
+        # el mismo trabajo.
+        GLib.timeout_add_seconds(1, self._tick_1s)
+        # 15 s y no 5: este ciclo lanza wpctl e ip como subprocesos, y
+        # ni la IP ni el volumen cambian solos. La bateria, que si
+        # interesa al instante, va por _poll_power, que solo lee sysfs.
+        GLib.timeout_add_seconds(15, self._tick_sys)
+
+        self.show_all()
+        self.refresh(initial=True)
+        # Indexar 275 .desktop son ~20 ms: poco, pero no hay razon para
+        # gastarlos antes de que la barra este en pantalla.
+        GLib.idle_add(self._index_apps)
+        # Lo fija la isla y no launch.sh: asi AUTOHIDE es la unica
+        # fuente de verdad y no pueden quedar descuadrados.
+        controls.bspwm("config", "top_padding",
+                       "0" if T.AUTOHIDE else str(T.ALTO_RESERVADO))
+        if T.AUTOHIDE:
+            GLib.timeout_add(1200, self._quiza_ocultar)
+
+    # ------------------------------------------------------------ datos
+
+    def _on_bspwm(self):
+        """Evento de bspwm. Si ha cambiado el escritorio, el notch asoma.
+
+        Con el auto-ocultado, cambiar de escritorio por teclado no mueve
+        el raton, asi que el notch seguia replegado: ni se veia donde
+        habias ido ni la pildora deslizandose. Aqui se distingue el
+        cambio de ESCRITORIO de los demas informes de bspwm (que llegan
+        tambien al cambiar de ventana) para no asomarlo sin motivo.
+        """
+        foco = self.bspwm.focused
+        if foco != getattr(self, "_ws_prev", None):
+            if self._ws_prev is not None:
+                self._mostrar()
+                self._programar_ocultado(T.REVEAL_MS)
+            self._ws_prev = foco
+        self.refresh()
+
+    def _index_apps(self):
+        self.apps = sources.scan_apps()
+        return False
+
+    def _tick_1s(self):
+        self._poll_power()
+        self._tick_clock()
+        if os.environ.get("ISLAND_DEBUG"):
+            self._secs = getattr(self, "_secs", 0) + 1
+            if self._secs % 60 == 0:
+                print("reconstrucciones de contenido en 60s: %d"
+                      % getattr(self, "_nrefresh", 0), flush=True)
+                self._nrefresh = 0
+        return True
+
+    def _tick_clock(self):
+        # El reloj muestra HH:MM, asi que 59 de cada 60 refrescos no
+        # cambiaban un solo pixel y aun asi reconstruian todo el
+        # contenido. Solo se refresca cuando el minuto cambia de verdad.
+        now = time.strftime("%H:%M")
+        if now != getattr(self, "_last_clock", None):
+            self._last_clock = now
+            self.refresh()
+        return True
+
+    def _tick_sys(self):
+        self.sys.refresh()
+        self.dnd = controls.dnd_paused()
+        self._sync_persistent()
+        self.refresh()
+        return True
+
+    def _poll_power(self):
+        """Vigila el enchufe aparte del refresco general.
+
+        Leer dos ficheros de sysfs es barato, asi que se hace cada
+        segundo: con el ciclo de 5 s la isla tardaba hasta cinco
+        segundos en enterarse de que habias enchufado, y la reaccion
+        dejaba de leerse como respuesta a lo que acababas de hacer.
+        """
+        before = self.sys.charging
+        self.sys.refresh_power()
+        now = self.sys.charging
+
+        if self._was_charging is None:
+            self._was_charging = now
+            return True
+
+        if now != self._was_charging:
+            self._was_charging = now
+            self.activities["power"] = Activity(
+                "power", 40, 4.0,
+                {"charging": now, "pct": self.sys.battery}, "pillx")
+            self.refresh()
+        elif before != now:
+            self.refresh()
+        return True
+
+    def _sync_persistent(self):
+        """Actividades que no las dispara un evento sino un estado: la
+        VPN levantada y la bateria critica."""
+        if self.sys.vpn_ip:
+            self.activities["vpn"] = Activity(
+                "vpn", 5, None,
+                {"ip": self.sys.vpn_ip, "target": sources.vpn_label()}, "pill")
+        else:
+            self.activities.pop("vpn", None)
+
+        if self.sys.battery <= 12 and not self.sys.charging:
+            self.activities["battery"] = Activity(
+                "battery", 8, None, {"pct": self.sys.battery}, "pill")
+        else:
+            self.activities.pop("battery", None)
+
+    def _on_player(self):
+        p = self.player
+        if not p.playing:
+            self.activities.pop("music", None)
+            self.refresh()
+            return
+        data = {"title": p.title, "artist": p.artist, "art": None}
+        self.activities["music"] = Activity("music", 10, None, data, "card")
+        url = p.art_url
+
+        def got(pb):
+            # Puede haber cambiado de cancion mientras bajaba: solo se
+            # acepta la imagen si sigue siendo la pista que la pidio.
+            act = self.activities.get("music")
+            if pb is not None and act is not None and act.data is data:
+                data["art"] = pb
+                self.refresh()
+            return False
+
+        sources.fetch_art(url, 56, got)
+        self.refresh()
+
+    def on_event(self, ev):
+        kind = ev.get("kind", "notify")
+        if kind == "panel":
+            # Permite abrir un panel sin raton: util para atarlo a una
+            # tecla en sxhkd, y es lo que hace comprobable el panel de
+            # forma automatica.
+            self.open_panel(ev.get("target", "volume"))
+            return
+        if kind == "dismiss":
+            self.activities.pop(ev.get("target", ""), None)
+            self.refresh()
+            return
+        spec = {
+            "volume":     (30, 1.8, "pillx"),
+            "brightness": (30, 1.8, "pillx"),
+            "notify":     (20, 5.0, "card"),
+            "music":      (10, None, "card"),
+            "power":      (40, 4.0, "pillx"),
+        }.get(kind, (20, 5.0, "card"))
+        prio, ttl, mode = spec
+        if ev.get("ttl") is not None:
+            ttl = ev["ttl"] or None
+        if kind == "power":
+            # Normaliza el evento externo a la misma forma que produce
+            # _poll_power, para que el renderizador sea uno solo.
+            ev = {"kind": "power", "charging": bool(ev.get("charging")),
+                  "pct": int(ev.get("value") or self.sys.battery)}
+        if kind == "notify":
+            # Limpiar ANTES de aplicar reglas: si no, una etiqueta
+            # partiria una palabra que una regla espera encontrar.
+            ev["title"] = sources.sanitize(ev.get("title"))
+            ev["body"] = sources.sanitize(ev.get("body"))
+            ev["app"] = sources.sanitize(ev.get("app"))
+            self._enrich(ev)
+        if kind == "music" and not ev.get("title"):
+            self.activities.pop("music", None)
+        else:
+            self.activities[kind] = Activity(kind, prio, ttl, ev, mode)
+        self.refresh()
+
+    def _enrich(self, ev):
+        """Identifica de que servicio web viene una notificacion.
+
+        Chrome manda todas sus notificaciones como 'Google Chrome', asi
+        que se cruza todo lo disponible (nombre, titulo, cuerpo, URL y
+        etiqueta de agrupacion) contra las reglas de apps.json. Si casa,
+        se sustituye el nombre por el del servicio y se baja su favicon.
+        """
+        rule = sources.match_app(ev.get("app"), ev.get("title"),
+                                 ev.get("body"), ev.get("hint"))
+        if rule is None:
+            return
+        ev["app"] = rule.get("name") or ev.get("app")
+        dom = rule.get("domain")
+        if not dom:
+            return
+
+        def got(pb):
+            act = self.activities.get("notify")
+            if pb is not None and act is not None and act.data is ev:
+                ev["pix"] = pb
+                self.refresh()
+            return False
+
+        sources.fetch_favicon(dom, 52, got)
+
+    def current(self):
+        now = time.monotonic()
+        dead = [k for k, a in self.activities.items() if not a.alive(now)]
+        for k in dead:
+            del self.activities[k]
+        if not self.activities:
+            return None
+        # Mayor prioridad; a igualdad, la mas reciente.
+        return max(self.activities.values(), key=lambda a: (a.prio, a.born))
+
+    # --------------------------------------------------------- contenido
+
+    def _measure_ctx(self):
+        if not hasattr(self, "_mcr"):
+            s = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
+            self._mcr = cairo.Context(s)
+        return self._mcr
+
+    def build(self, cr):
+        act = self.current()
+        if act is None:
+            return "idle", "pill", self.build_idle(cr)
+        key = act.kind
+        if act.kind == "panel":
+            # La clave distingue CADA panel, no solo "es un panel": si no,
+            # pasar de la lista de wifi al campo de contrasena no cuenta
+            # como cambio de estado y el realce de hover se queda pegado
+            # sobre una zona que ya no existe.
+            key = "panel:" + str(act.data.get("which"))
+        return key, act.mode, self.build_activity(cr, act)
+
+    @staticmethod
+    def _ico(nombre, px, color, respaldo="", tag=None):
+        """Icono por nombre interno, en el juego que diga theme.USAR_SOLAR.
+
+        Centralizarlo aqui es lo que permite cambiar de juego de iconos
+        con una constante: las decenas de llamadas repartidas por los
+        paneles no saben si detras hay un SVG o un glifo.
+        """
+        font = (T.F_SMALL if px <= 23
+                else T.F_ICON if px <= 30 else T.F_ICON_L)
+        # 'nombre' puede ser un nombre interno ("wifi") o ya un glifo
+        # suelto: algunos mapas de theme guardan el caracter directamente.
+        # Aceptar ambos evita tener que mantenerlos sincronizados.
+        glifo = T.ICON_GLYPH.get(nombre)
+        if glifo is None:
+            glifo = respaldo or (nombre if len(nombre) <= 2 else "")
+        if T.USAR_SOLAR:
+            return R.Icon(nombre, px, color, glifo, font, tag)
+        return R.Text(glifo, font, color, tag=tag)
+
+    def build_idle(self, cr):
+        si = self.sys
+        row = R.Row()
+        # Reloj y fecha forman un grupo pulsable que abre el calendario.
+        row.add(R.Row([
+            R.Text(time.strftime("%H:%M"), T.F_CLOCK, T.FG),
+            # La fecha acompana al reloj: mismo grupo, por eso GAP_ITEM y
+            # no GAP_GROUP. Mas pequena y apagada para que el reloj siga
+            # siendo el ancla visual del notch.
+            R.Gap(T.GAP_ITEM),
+            R.Text(time.strftime("%a %d %b"), T.F_SMALL, T.DIM),
+        ], tag="clock"))
+        row.add(R.Gap(T.GAP_GROUP))
+
+        # Indicador de escritorios: pista de huecos iguales con una
+        # pildora azul que se desliza al cambiar. El muelle solo mueve
+        # su posicion; la pista es fija, asi que la animacion es un
+        # unico elemento viajando y no dos cambiando de tamano.
+        estados = [st for _n, st in self.bspwm.desktops]
+        destino = self.bspwm.focused * R.WsBar.paso()
+        if self.sp_wsx.target != destino:
+            self.sp_wsx.set(destino)
+            self.ensure_tick()
+        ws = R.Row([R.WsBar(estados, self.sp_wsx.value)], tag="ws")
+        row.add(ws)
+
+        row.add(R.Gap(T.GAP_GROUP))
+        # Solo aparece cuando esta activo: un icono permanente para un
+        # estado que casi siempre esta apagado seria ruido fijo.
+        if self.dnd:
+            row.add(R.Row([self._ico("bell-off", 28, T.ORANGE)], tag="dnd"))
+            row.add(R.Gap(T.GAP_ITEM))
+        # Cada icono de estado va envuelto en una fila con etiqueta: es
+        # lo que convierte el dibujo en una zona pulsable, porque las
+        # etiquetas se registran al dibujar con su posicion real.
+        row.add(R.Row([
+            self._ico("vol-mute" if si.muted
+                      else ["vol-mute", "vol-low", "vol-mid", "vol-high"][1 + min(2, si.volume // 40)],
+                      28, T.DIM2 if si.muted else T.FG,
+                      T.G_MUTE)], tag="vol"))
+        row.add(R.Gap(T.GAP_ITEM))
+        row.add(R.Row([
+            self._ico("wifi" if si.wifi else "wifi-off", 28,
+                      T.FG if si.wifi else T.DIM2, T.G_WIFI)], tag="net"))
+        row.add(R.Gap(T.GAP_ITEM))
+        if si.charging:
+            bat = [self._ico("bolt", 28, T.GREEN, T.G_BOLT), R.Gap(6),
+                   R.Text("%d%%" % si.battery, T.F_TITLE, T.GREEN)]
+        else:
+            lvl = min(4, max(0, si.battery * 5 // 100))
+            col = T.RED if si.battery <= 15 else T.FG
+            bat = [self._ico("bat-%d" % lvl, 28, col, T.G_BAT[lvl]), R.Gap(6),
+                   R.Text("%d%%" % si.battery, T.F_TITLE, col)]
+        row.add(R.Row(bat, tag="bat"))
+        row.add(R.Gap(T.GAP_GROUP))
+        row.add(self._ico("power", 28, T.DIM, T.G_POWER, tag="power"))
+        return row
+
+    def build_activity(self, cr, act):
+        d = act.data
+        k = act.kind
+
+        if k in ("volume", "brightness"):
+            pct = int(d.get("value", 0))
+            if k == "volume":
+                nom = ("vol-mute" if d.get("muted")
+                       else ["vol-mute", "vol-low", "vol-mid", "vol-high"][1 + min(2, pct // 40)])
+                col = T.DIM2 if d.get("muted") else T.FG
+            else:
+                nom, col = "sun", T.ORANGE
+            return R.Row().add(
+                self._ico(nom, 34, col, T.G_SUN),
+                R.Gap(18),
+                R.Bar(260, 10, pct / 100.0, col),
+                R.Gap(16),
+                R.Text("%d%%" % pct, T.F_TITLE, T.FG))
+
+        if k == "power":
+            on = d.get("charging")
+            pct = d.get("pct", 0)
+            col = T.GREEN if on else T.FG
+            return R.Row().add(
+                R.BatteryAnim(54, 26, pct / 100.0, self.anim, col, on),
+                R.Gap(18),
+                self._ico("bolt", 28, T.GREEN, T.G_BOLT) if on else R.Gap(0),
+                R.Gap(8) if on else R.Gap(0),
+                R.Text("Cargando" if on else "En bater\u00eda",
+                       T.F_TITLE, col),
+                R.Gap(T.GAP_ITEM),
+                R.Text("\u00b7", T.F_SUB, T.DIM2),
+                R.Gap(T.GAP_ITEM),
+                R.Text("%d%%" % pct, T.F_TITLE, T.FG))
+
+        if k == "vpn":
+            r = R.Row().add(
+                R.Dot(7, T.GREEN), R.Gap(14),
+                R.Text(d.get("ip", ""), T.F_BODY, T.FG))
+            if d.get("target"):
+                r.add(R.Gap(12), R.Text("·", T.F_BODY, T.DIM2),
+                      R.Gap(12), R.Text(d["target"], T.F_BODY, T.DIM))
+            return r
+
+        if k == "battery":
+            return R.Row().add(
+                self._ico("bat-0", 34, T.RED, T.G_BAT[0]), R.Gap(16),
+                R.Text("Bateria %d%%" % d.get("pct", 0), T.F_TITLE, T.RED))
+
+        if k == "music":
+            art = d.get("art")
+            tocando = self.player.status == "Playing"
+            # La caratula puede llegar tarde (descarga en hilo); hasta
+            # entonces se dibuja el glifo de nota y se sustituye sola.
+            head = (R.Image(art, 56) if art is not None
+                    else self._ico("music", 34, T.ACCENT, T.G_MUSIC))
+            mandos = R.Row()
+            for nom, etq in (("media-prev", "media:previous"),
+                             ("media-pause" if tocando else "media-play",
+                              "media:play-pause"),
+                             ("media-next", "media:next")):
+                mandos.add(R.Row([self._ico(nom, 26, T.FG)], tag=etq),
+                           R.Gap(T.GAP_ITEM))
+            return R.Row().add(
+                head, R.Gap(20),
+                R.Stack([
+                    R.Row().add(R.Text(self._clip(d.get("title", ""), 30),
+                                       T.F_TITLE, T.FG)),
+                    R.Row().add(R.Text(self._clip(d.get("artist", ""), 34),
+                                       T.F_SUB, T.DIM)),
+                ]),
+                R.Gap(T.GAP_GROUP), mandos)
+
+        if k == "panel":
+            return self.build_panel(cr, d.get("which"))
+
+        # notificacion
+        urg = d.get("urgency", "normal")
+        acc = T.RED if urg == "critical" else T.ACCENT
+        # Prioridad del icono: favicon del servicio > icono de la app >
+        # campana. El favicon ya dice de que servicio es, asi que el
+        # texto queda libre para el CONTENIDO (quien escribe y que dice)
+        # en vez de gastar la primera linea repitiendo el nombre.
+        pb = d.get("pix") or sources.load_icon(d.get("icon"), 52,
+                                               d.get("app", ""))
+        head = (R.Image(pb, 52) if pb is not None
+                else self._ico("bell", 34, acc, T.G_BELL))
+        title = d.get("title") or d.get("app", "")
+        body = d.get("body") or ""
+        if body.strip() == title.strip():
+            body = ""
+        rows = [R.Row().add(R.Text(self._clip(title, 32), T.F_TITLE, T.FG))]
+        if body:
+            rows.append(R.Row().add(R.Text(self._clip(body, 46), T.F_SUB, T.DIM)))
+        return R.Row().add(head, R.Gap(20), R.Stack(rows))
+
+    # ------------------------------------------------------------ paneles
+
+    def build_panel(self, cr, which):
+        si = self.sys
+
+        if which == "volume":
+            pct = 0 if si.muted else si.volume
+            col = T.DIM2 if si.muted else T.FG
+            nom = "vol-mute" if si.muted else ["vol-mute", "vol-low", "vol-mid", "vol-high"][1 + min(2, pct // 40)]
+            # Una fila, no tres. El altavoz silencia al pulsarlo (como el
+            # HUD de iOS), asi que los botones "Silenciar"/"Mezclador"
+            # sobraban: eran una tercera fila entera para una accion que
+            # ya cabe en el propio icono.
+            return R.Row().add(
+                R.Row([self._ico(nom, 34, col, T.G_MUTE)], tag="vol-mute"),
+                R.Gap(22),
+                R.Slider(420, 12, pct / 100.0, col, tag="vol-slider"),
+                R.Gap(20),
+                R.Text("%d%%" % pct, T.F_TITLE, T.FG))
+
+        if which == "battery":
+            if not controls.epp_disponible():
+                # Sin selector de perfiles no se ensenan botones que no
+                # harian nada: solo el estado.
+                lvl = min(4, max(0, si.battery * 5 // 100))
+                return R.Row().add(
+                    self._ico("bolt" if si.charging else "bat-%d" % lvl, 34,
+                              T.GREEN if si.charging else T.FG),
+                    R.Gap(16),
+                    R.Text("%d%% \u00b7 %s" % (
+                        si.battery,
+                        "cargando" if si.charging else "en bater\u00eda"),
+                        T.F_TITLE, T.FG))
+            cur = controls.epp_current()
+
+            # El nombre del perfil va en un hueco de ancho RESERVADO (el
+            # del nombre mas largo), no dentro del chip.
+            #
+            # Antes el chip senalado se ensanchaba para mostrar su
+            # nombre, y eso desplazaba toda la fila: el chip que estabas
+            # apuntando se iba de debajo del cursor y el clic caia en
+            # otro sitio. Reservando el hueco, el ancho total no cambia
+            # y los chips no se mueven jamas.
+            lbl_w = max(R.Text(l, T.F_SUB, T.FG).size(cr)[0]
+                        for l, _ in controls.EPP_MODES)
+            shown = next((l for l, m in controls.EPP_MODES
+                          if self.hover == "prof:" + m), None)
+            if shown is None:
+                shown = next((l for l, m in controls.EPP_MODES if m == cur),
+                             "Auto")
+            txt = R.Text(shown, T.F_SUB, T.FG)
+            txt_w = txt.size(cr)[0]
+
+            chips = R.Row()
+            for i, (label, mode) in enumerate(controls.EPP_MODES):
+                if i:
+                    chips.add(R.Gap(8))
+                on = (mode == cur)
+                # Siempre solo icono: tamano constante, zona de clic
+                # constante.
+                # Blanco sobre el azul activo, como en rofi: una sola
+                # regla para todo el escritorio.
+                chips.add(R.Chip("", T.F_SUB, T.FG,
+                                 T.ACCENT if on else T.SURF_1,
+                                 tag="prof:" + mode,
+                                 icon=self._ico(T.G_PROF[mode], 26,
+                                                T.FG if on else T.DIM),
+                                 padx=15, pady=10))
+
+            lvl = min(4, max(0, si.battery * 5 // 100))
+            return R.Row().add(
+                self._ico("bolt" if si.charging else "bat-%d" % lvl, 34,
+                          T.GREEN if si.charging else T.FG, T.G_BOLT),
+                R.Gap(12),
+                R.Text("%d%%" % si.battery, T.F_TITLE, T.FG),
+                R.Gap(T.GAP_ITEM),
+                R.Text("\u00b7", T.F_SUB, T.DIM2),
+                R.Gap(T.GAP_ITEM),
+                txt,
+                R.Gap(lbl_w - txt_w + T.GAP_GROUP),
+                chips)
+
+        if which == "calendar":
+            return self.build_calendar(cr)
+
+        if which == "desktop":
+            mono = controls.bspwm_layout() == "monocle"
+            gap = controls.bspwm_gap()
+            acciones = [
+                ("monocle",   "Monocle",  "ds:monocle", mono),
+                ("balance",   "Equilibrar", "ds:balance", False),
+                ("rotate",    "Rotar",    "ds:rotate",  False),
+                ("gap-minus", "Menos aire", "ds:gap-",  False),
+                ("gap-plus",  "Mas aire", "ds:gap+",    False),
+                ("bell-off",  "No molestar", "ds:dnd",  self.dnd),
+            ]
+            lbl_w = max(R.Text(a[1], T.F_SUB, T.FG).size(cr)[0]
+                        for a in acciones)
+            shown = next((a[1] for a in acciones if self.hover == a[2]), None)
+            if shown is None:
+                shown = "Escritorio %d \u00b7 %dpx" % (
+                    self.bspwm.focused + 1, gap)
+            txt = R.Text(shown, T.F_SUB, T.DIM)
+            chips = R.Row()
+            for i, (ico, _lab, tag, activo) in enumerate(acciones):
+                if i:
+                    chips.add(R.Gap(8))
+                chips.add(R.Chip("", T.F_SUB, T.FG,
+                                 T.ACCENT if activo else T.SURF_1,
+                                 tag=tag,
+                                 icon=self._ico(ico, 26,
+                                                T.FG if activo else T.DIM),
+                                 padx=15, pady=10))
+            return R.Stack([R.Row().add(txt), chips], gap=16, center=True)
+
+        if which == "launcher":
+            return self.build_launcher(cr)
+
+        if which == "powermenu":
+            cur = self.hover or ""
+            lbl_w = max(R.Text(a[0], T.F_SUB, T.FG).size(cr)[0]
+                        for a in T.G_POWER_ACTS)
+            shown = next((a[0] for i, a in enumerate(T.G_POWER_ACTS)
+                          if cur == "act:%d" % i), "Apagar o salir")
+            txt = R.Text(shown, T.F_SUB, T.DIM)
+            chips = R.Row()
+            for i, (label, glifo, _cmd) in enumerate(T.G_POWER_ACTS):
+                if i:
+                    chips.add(R.Gap(8))
+                sel = (cur == "act:%d" % i)
+                chips.add(R.Chip("", T.F_SUB, T.FG,
+                                 T.ACCENT if sel else T.SURF_1,
+                                 tag="act:%d" % i,
+                                 icon=self._ico(glifo, 26,
+                                                T.FG if sel else T.DIM),
+                                 padx=15, pady=10))
+            # Mismo truco que en el panel de energia: el nombre vive en
+            # un hueco de ancho reservado, no dentro del chip, para que
+            # los botones no se muevan al pasar por encima.
+            return R.Stack([
+                R.Row().add(txt),
+                chips,
+            ], gap=16, center=True)
+
+        if which == "wifi-pw":
+            pw = self.pw or {}
+            err = pw.get("error")
+            return R.Stack([
+                R.Row().add(
+                    self._ico("lock", 28, T.RED if err else T.ACCENT, T.G_LOCK),
+                    R.Gap(T.GAP_ITEM),
+                    R.Text(pw.get("ssid", ""), T.F_TITLE, T.FG)),
+                R.Row().add(R.Field(420, pw.get("text", ""), T.F_SUB, T.FG,
+                                    caret=self.caret_on, tag="pw-field")),
+                R.Row().add(R.Text(
+                    "Contrase\u00f1a incorrecta \u00b7 reint\u00e9ntalo" if err
+                    else "Intro para conectar \u00b7 Esc para cancelar",
+                    T.F_SMALL, T.RED if err else T.DIM2)),
+            ], gap=T.GAP_ROW, center=True)
+
+        # ---- wifi
+        nets = self.wifi_nets
+        if nets is None:
+            return R.Row().add(
+                self._ico("wifi", 34, T.DIM, T.G_WIFI), R.Gap(18),
+                R.Text("Buscando redes\u2026", T.F_TITLE, T.DIM))
+        if not nets:
+            return R.Row().add(
+                self._ico("wifi-off", 34, T.DIM, T.G_WIFI_NO), R.Gap(18),
+                R.Text("Sin redes a la vista", T.F_TITLE, T.DIM))
+
+        # Se mide el SSID mas largo para alinear las barras de cobertura
+        # en columna; si no, cada fila las pondria a una altura distinta
+        # y la lista se ve descuadrada.
+        # Cada ancho con SU fuente: la conectada va en semibold y mide
+        # mas que las demas. Midiendolas todas igual, el candado y las
+        # barras de esa fila quedarian descuadrados.
+        widths = [R.Text(n[0], T.F_TITLE if n[2] else T.F_SUB,
+                         T.FG).size(cr)[0] for n in nets]
+        maxw = max(widths)
+
+        # El titulo se sangra la misma columna que ocupa el indicador de
+        # "conectada", para que "Wi-Fi" y los nombres de red arranquen en
+        # la misma vertical. Sin esto el titulo queda descolgado a la
+        # izquierda de la lista.
+        # La IP local vive aqui y no en el notch: es un dato de consulta,
+        # no de vistazo, y su sitio natural es junto a la red a la que
+        # pertenece.
+        head = R.Row().add(R.Gap(T.COL_MARK + T.GAP_ITEM),
+                           R.Text("Wi-Fi", T.F_TITLE, T.FG))
+        if si.ip:
+            head.add(R.Gap(T.GAP_ITEM),
+                     R.Text("\u00b7", T.F_SUB, T.DIM2),
+                     R.Gap(T.GAP_ITEM),
+                     R.Text(si.ip, T.F_SMALL, T.DIM))
+        rows = [head]
+
+        for (ssid, sig, inuse, sec), w in zip(nets, widths):
+            lvl = 1 + min(3, sig // 26)
+            mark = (R.Row([R.Gap((T.COL_MARK - 12) / 2.0), R.Dot(6, T.GREEN),
+                           R.Gap((T.COL_MARK - 12) / 2.0)])
+                    if inuse else R.Gap(T.COL_MARK))
+            rows.append(R.Row([
+                mark,
+                R.Gap(T.GAP_ITEM),
+                # La conectada en semibold: el punto verde solo se ve si
+                # miras la columna, y el peso se nota de un vistazo.
+                R.Text(ssid, T.F_TITLE if inuse else T.F_SUB,
+                       T.FG if inuse else T.DIM),
+                R.Gap(maxw - w + T.GAP_GROUP),
+                self._ico("lock", 20, T.DIM2, T.G_LOCK) if sec else R.Gap(0),
+                R.Gap(T.GAP_ITEM),
+                R.Bars(lvl, T.FG if inuse else T.DIM, T.DIM2),
+            ], tag="wifi:" + ssid))
+        return R.Stack(rows, gap=T.GAP_ROW)
+
+    def build_calendar(self, cr):
+        hoy = datetime.date.today()
+        # Mes mostrado = hoy + desplazamiento, normalizando el desborde
+        # de diciembre a enero con aritmetica sobre meses absolutos.
+        m = hoy.month - 1 + self.cal_off
+        y, m = hoy.year + m // 12, m % 12 + 1
+
+        CW, CH = 46, 34
+        titulo = "%s %d" % (calendar.month_name[m].capitalize(), y)
+
+        cab = R.Row().add(
+            R.Row([self._ico("prev", 22, T.DIM)], tag="cal:prev"),
+            R.Gap(T.GAP_ITEM),
+            R.Day(CW * 5, CH, titulo, T.F_TITLE, T.FG, tag="cal:hoy"),
+            R.Gap(T.GAP_ITEM),
+            R.Row([self._ico("next", 22, T.DIM)], tag="cal:next"))
+
+        # Iniciales en castellano: la X de miercoles existe justo para
+        # no chocar con la M de martes.
+        dias = R.Row()
+        for d in ("L", "M", "X", "J", "V", "S", "D"):
+            dias.add(R.Day(CW, 26, d, T.F_SMALL, T.DIM2))
+
+        filas = [cab, dias]
+        for semana in calendar.Calendar(firstweekday=0).monthdayscalendar(y, m):
+            fila = R.Row()
+            for n in semana:
+                if n == 0:
+                    fila.add(R.Day(CW, CH, "", T.F_SMALL, T.DIM2))
+                    continue
+                es_hoy = (n == hoy.day and m == hoy.month and y == hoy.year)
+                fila.add(R.Day(CW, CH, str(n), T.F_SMALL, T.FG,
+                               circle=T.ACCENT if es_hoy else None))
+            filas.append(fila)
+        return R.Stack(filas, gap=6, center=True)
+
+    def _results(self, q):
+        """Resultados de todos los origenes, ya ordenados.
+
+        Cada uno es (tipo, titulo, subtitulo, icono, carga util). Tener
+        un solo tipo de resultado es lo que permite que el teclado, el
+        raton y el dibujado no tengan que saber de donde salio cada
+        cosa.
+        """
+        q = q.strip()
+        out = []
+
+        # La calculadora va primero: si lo escrito es una cuenta, es
+        # casi seguro lo que se busca y no un nombre de programa.
+        val = sources.calc_eval(q) if q else None
+        if val is not None:
+            out.append(("calc", val, "%s \u00b7 \u23ce copia" % q, None, val))
+
+        if not q:
+            # Sin busqueda: primero las ventanas abiertas y luego lo mas
+            # usado. En un gestor de mosaico, lo que suele querer quien
+            # abre el lanzador es saltar a algo que ya tiene abierto; y
+            # mientras no haya historial de uso, una rodaja alfabetica
+            # de 275 aplicaciones no dice absolutamente nada.
+            for wid, titulo, clase in self.wins[:3]:
+                out.append(("win", titulo, "Ventana \u00b7 %s" % clase,
+                            clase, wid))
+            apps = sorted(self.apps,
+                          key=lambda a: -sources.frec_score(a[1]))
+            apps = [a for a in apps if sources.frec_score(a[1]) > 0][:5]
+            out += [("app", a[0], "Aplicaci\u00f3n", a[2], a[1]) for a in apps]
+            return out[:5]
+
+        ql = q.lower()
+        for wid, titulo, clase in self.wins:
+            if ql in titulo.lower() or ql in clase.lower():
+                out.append(("win", titulo, "Ventana \u00b7 %s" % clase,
+                            clase, wid))
+
+        for a in sources.match_apps(self.apps, q, 6):
+            out.append(("app", a[0], "Aplicaci\u00f3n", a[2], a[1]))
+
+        # Empate entre aplicaciones: gana la mas usada.
+        out.sort(key=lambda r: (0 if r[0] == "calc" else
+                                1 if r[0] == "win" else 2,
+                                -sources.frec_score(r[4])))
+
+        if not out and " " not in q and q.isascii():
+            out.append(("cmd", q, "Ejecutar comando", None, q))
+        return out[:5]
+
+    def build_launcher(self, cr):
+        st = self.launch or {"q": "", "sel": 0, "res": []}
+        res = st["res"]
+        ANCHO = 560
+
+        cab = R.Row().add(
+            self._ico("search", 28, T.DIM, T.G_SEARCH),
+            R.Gap(T.GAP_ITEM),
+            R.Field(ANCHO - 46, st["q"], T.F_SUB, T.FG,
+                    caret=self.caret_on, secret=False))
+        filas = [cab]
+
+        if not res:
+            filas.append(R.Row().add(
+                R.Gap(T.GAP_ITEM),
+                R.Text("Sin resultados" if st["q"] else "Escribe para buscar",
+                       T.F_SUB, T.DIM2)))
+            return R.Stack(filas, gap=T.GAP_ROW)
+
+        sel = min(st["sel"], len(res) - 1)
+        tipo, titulo, sub, icono, _carga = res[sel]
+
+        # Destacado: lo que hara el Intro, en grande y con su tipo. Una
+        # lista sola obliga a leer linea a linea para saber que esta
+        # seleccionado; asi se ve de un vistazo.
+        pb = sources.load_icon(icono, 56, titulo) if icono else None
+        glifo, _etq = T.G_RES[tipo]
+        hero = R.Row().add(
+            R.Image(pb, 56) if pb is not None
+            else self._ico(glifo, 44, T.ACCENT),
+            R.Gap(18),
+            R.Stack([
+                R.Row().add(R.Text(self._clip(titulo, 28), T.F_HERO, T.FG)),
+                R.Row().add(R.Text(self._clip(sub, 40), T.F_SMALL, T.DIM)),
+            ], gap=4))
+        filas.append(hero)
+        filas.append(R.Rule(ANCHO, T.DIM2))
+
+        for i, (t2, tit2, _s2, ic2, _p2) in enumerate(res):
+            pb2 = sources.load_icon(ic2, 26, tit2) if ic2 else None
+            g2, etq2 = T.G_RES[t2]
+            nombre = R.Text(self._clip(tit2, 30), T.F_SMALL,
+                            T.FG if i == sel else T.DIM)
+            ancho_nom = nombre.size(cr)[0]
+            etq = R.Text(etq2, T.F_SMALL, T.DIM2)
+            # La etiqueta de tipo se alinea a la derecha con un hueco
+            # calculado, para que forme columna en vez de ir pegada a
+            # cada nombre.
+            hueco = max(10, ANCHO - 2 * 12 - 26 - T.GAP_ITEM
+                        - ancho_nom - etq.size(cr)[0])
+            fila = R.Row([
+                R.Image(pb2, 26) if pb2 is not None
+                else self._ico(g2, 22, T.DIM2),
+                R.Gap(T.GAP_ITEM), nombre, R.Gap(hueco), etq,
+            ])
+            filas.append(R.Box(fila, bg=T.SURF_1 if i == sel else None,
+                               w=ANCHO, padx=12, pady=7, tag="app:%d" % i))
+
+        filas.append(R.Row().add(
+            R.Text("\u2191\u2193 navegar \u00b7 \u23ce abrir \u00b7 esc cerrar",
+                   T.F_SMALL, T.DIM2)))
+        return R.Stack(filas, gap=10)
+
+    def _start_launcher(self):
+        # Las ventanas se consultan AQUI y no en un ciclo: son ~10 ms y
+        # solo importan mientras el lanzador esta abierto.
+        self.wins = sources.list_windows()
+        self.launch = {"q": "", "sel": 0, "res": []}
+        self.launch["res"] = self._results("")
+        self.activities["panel"] = Activity(
+            "panel", 50, None, {"which": "launcher"}, "panel")
+        def fallo():
+            self.launch = None
+            self.activities.pop("panel", None)
+            self.on_event({"kind": "notify", "app": "Lanzador",
+                           "body": "No se pudo capturar el teclado"})
+            self.refresh()
+
+        # El panel se abre YA y la captura llega detras: esperar a tenerla
+        # para pintar dejaria medio segundo de pantalla muerta despues de
+        # pulsar el atajo.
+        self._grab_retry(Gdk.SeatCapabilities.KEYBOARD
+                         | Gdk.SeatCapabilities.ALL_POINTING, fallo)
+        self._blink_id = GLib.timeout_add(530, self._blink)
+        self.refresh()
+
+    def _launch_sel(self):
+        st = self.launch
+        if not st or not st["res"]:
+            return
+        tipo, titulo, _sub, _ic, carga = st["res"][min(st["sel"],
+                                                       len(st["res"]) - 1)]
+        self._close_panel()
+        self.refresh()
+
+        if tipo == "calc":
+            ok = sources.copy_clipboard(carga)
+            self.on_event({"kind": "notify", "app": "Calculadora",
+                           "body": ("%s copiado" % carga) if ok
+                                   else "No se pudo copiar"})
+            return
+
+        if tipo == "win":
+            # Saltar a una ventana ya abierta en vez de lanzar otra
+            # instancia, que es lo que haria un lanzador a secas.
+            self._spawn("bspc node %s -f" % carga)
+            sources.frec_bump("win:" + titulo)
+            return
+
+        sources.frec_bump(carga)
+        self._spawn(carga)
+
+    def _spawn(self, cmd):
+        try:
+            GLib.spawn_async(["/bin/sh", "-c", cmd],
+                             flags=GLib.SpawnFlags.SEARCH_PATH)
+        except Exception:
+            self.on_event({"kind": "notify", "app": "Lanzador",
+                           "body": "No se pudo ejecutar"})
+
+    def open_panel(self, which):
+        act = self.activities.get("panel")
+        if act is not None and act.data.get("which") == which:
+            self._close_panel()                    # el mismo icono cierra
+        elif which == "launcher":
+            self._start_launcher()                 # necesita teclado
+        else:
+            # volumen y energia caben en una fila: pildora alta en vez
+            # de panel, que reserva padding vertical de tarjeta.
+            mode = "pillx" if which in ("volume", "battery") else "panel"
+            if which == "calendar":
+                self.cal_off = 0        # se abre siempre en el mes actual
+            self.activities["panel"] = Activity(
+                "panel", 50, 8.0, {"which": which}, mode)
+            self._grab(Gdk.SeatCapabilities.ALL_POINTING)
+            if which == "volume":
+                # Relectura puntual: el sondeo periodico es lento (15 s)
+                # a proposito, pero al abrir el panel el dato tiene que
+                # estar al dia.
+                self.sys.refresh()
+            if which == "wifi":
+                self.wifi_nets = None
+                controls.wifi_scan(self._on_wifi)
+        self.refresh()
+
+    def _on_wifi(self, nets):
+        self.wifi_nets = nets
+        self.known = controls.known_networks()
+        self._touch_panel()
+        self.refresh()
+        return False
+
+    # --------------------------------------------- captura de dispositivos
+
+    def _grab(self, caps):
+        """Captura puntero y/o teclado para el seat.
+
+        Con el puntero capturado los clics de FUERA de la isla llegan
+        aqui en vez de irse a la ventana de debajo: es lo que permite
+        cerrar un panel pulsando en cualquier sitio, como un menu
+        normal. La ventana es un DOCK sin foco, asi que sin captura no
+        hay otra forma de enterarse.
+        """
+        self._ungrab()
+        try:
+            seat = self.get_display().get_default_seat()
+            st = seat.grab(self.get_window(), caps, False,
+                           None, None, None, None)
+            self._grab_status = st
+            self._seat = seat if st == Gdk.GrabStatus.SUCCESS else None
+        except Exception:
+            self._grab_status = None
+            self._seat = None
+        if self._seat is not None:
+            self._arm_guard()
+        return self._seat is not None
+
+    def _grab_retry(self, caps, on_fail, intentos=20):
+        """Insiste con la captura hasta que X la conceda.
+
+        Al disparar el atajo desde sxhkd, X mantiene una captura activa
+        de teclado para esa combinacion HASTA QUE SE SUELTAN LAS TECLAS,
+        asi que el primer intento se rechaza con AlreadyGrabbed. Por eso
+        abrir el panel con island-send funcionaba y con super+d no.
+        Reintentar cada 25 ms durante medio segundo cubre de sobra lo que
+        tarda cualquiera en levantar los dedos.
+        """
+        if self._grab(caps):
+            return True
+        if intentos <= 0:
+            on_fail()
+            return False
+
+        def otra_vez():
+            self._grab_retry(caps, on_fail, intentos - 1)
+            return False
+
+        GLib.timeout_add(25, otra_vez)
+        return False
+
+    def _arm_guard(self):
+        """Perro guardian de la captura, por INACTIVIDAD.
+
+        Si algo dejase el proceso colgado con el teclado o el puntero
+        capturados, quedarian inservibles; a los 20 s se sueltan pase lo
+        que pase. Pero el plazo se reinicia con cada tecla o clic: con un
+        temporizador fijo desde el inicio, el lanzador se cerraria solo a
+        mitad de una busqueda que durase mas de 20 s.
+        """
+        g = getattr(self, "_grab_guard", None)
+        if g:
+            GLib.source_remove(g)
+        self._grab_guard = GLib.timeout_add_seconds(20, self._grab_timeout)
+
+    def _ungrab(self):
+        if getattr(self, "_seat", None) is not None:
+            try:
+                self._seat.ungrab()
+            except Exception:
+                pass
+            self._seat = None
+        g = getattr(self, "_grab_guard", None)
+        if g:
+            GLib.source_remove(g)
+            self._grab_guard = None
+
+    def _grab_timeout(self):
+        self._grab_guard = None
+        self._close_panel()
+        self.refresh()
+        return False
+
+    def _close_panel(self):
+        """Unica salida de un panel: suelta la captura, para el cursor
+        del campo y descarta la actividad."""
+        self.pw = None
+        self.launch = None
+        b = getattr(self, "_blink_id", None)
+        if b:
+            GLib.source_remove(b)
+            self._blink_id = None
+        self._ungrab()
+        self.activities.pop("panel", None)
+
+    # ------------------------------------------------- campo de contrasena
+
+    def _start_pw(self, ssid):
+        self.pw = {"ssid": ssid, "text": "", "error": False}
+        self.activities["panel"] = Activity(
+            "panel", 50, None, {"which": "wifi-pw"}, "panel")
+
+        # Teclado Y puntero a la vez, en UNA sola llamada: pedirlos por
+        # separado haria que la segunda captura soltase la primera.
+        def fallo():
+            # Sin teclado no hay forma de escribir: mejor decirlo que
+            # dejar un campo muerto en el que el usuario teclea en vano.
+            self.pw = None
+            self.activities.pop("panel", None)
+            self.on_event({"kind": "notify", "app": "Wi-Fi",
+                           "body": "No se pudo capturar el teclado"})
+            self.refresh()
+
+        self._grab_retry(Gdk.SeatCapabilities.KEYBOARD
+                         | Gdk.SeatCapabilities.ALL_POINTING, fallo)
+        self._blink_id = GLib.timeout_add(530, self._blink)
+        self.refresh()
+
+    def _blink(self):
+        self.caret_on = not self.caret_on
+        self._damage()
+        return self.pw is not None or self.launch is not None
+
+    def on_key(self, widget, ev):
+        if self._seat is not None:
+            self._arm_guard()
+        if self.launch is not None:
+            return self._key_launcher(ev)
+        if self.pw is None:
+            return False
+        kv = ev.keyval
+        if kv == Gdk.KEY_Escape:
+            self._close_panel()
+            self.refresh()
+        elif kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            ssid, text = self.pw["ssid"], self.pw["text"]
+            if text:
+                self._close_panel()
+                self.refresh()
+                controls.wifi_connect_pw(ssid, text, self._after_wifi)
+        elif kv == Gdk.KEY_BackSpace:
+            self.pw["text"] = self.pw["text"][:-1]
+            self.pw["error"] = False
+            self.refresh()
+        else:
+            ch = Gdk.keyval_to_unicode(kv)
+            if ch >= 32:
+                self.pw["text"] += chr(ch)
+                self.pw["error"] = False
+                self.refresh()
+        return True
+
+    def _key_launcher(self, ev):
+        st = self.launch
+        kv = ev.keyval
+        if kv == Gdk.KEY_Escape:
+            self._close_panel()
+            self.refresh()
+            return True
+        if kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self._launch_sel()
+            return True
+        if kv in (Gdk.KEY_Down, Gdk.KEY_Tab):
+            st["sel"] = min(len(st["res"]) - 1, st["sel"] + 1)
+        elif kv in (Gdk.KEY_Up, Gdk.KEY_ISO_Left_Tab):
+            st["sel"] = max(0, st["sel"] - 1)
+        elif kv == Gdk.KEY_BackSpace:
+            st["q"] = st["q"][:-1]
+            st["res"] = self._results(st["q"])
+            st["sel"] = 0
+        else:
+            ch = Gdk.keyval_to_unicode(kv)
+            if ch < 32:
+                return True
+            st["q"] += chr(ch)
+            st["res"] = self._results(st["q"])
+            # Al cambiar la busqueda la seleccion vuelve arriba: dejarla
+            # donde estaba apuntaria a un resultado distinto del que el
+            # usuario tenia delante.
+            st["sel"] = 0
+        self.refresh()
+        return True
+
+    def _touch_panel(self, extra=8.0):
+        """Cada interaccion aplaza el cierre: si no, el panel se cerraria
+        en mitad de un arrastre del volumen."""
+        act = self.activities.get("panel")
+        if act is not None:
+            act.expires = time.monotonic() + extra
+
+    @staticmethod
+    def _clip(s, n):
+        s = " ".join((s or "").split())
+        return s if len(s) <= n else s[:n - 1] + "…"
+
+    # ------------------------------------------------------------ estado
+
+    def refresh(self, initial=False):
+        if os.environ.get("ISLAND_DEBUG"):
+            self._nrefresh = getattr(self, "_nrefresh", 0) + 1
+        cr = self._measure_ctx()
+        key, mode, item = self.build(cr)
+        w, h = item.size(cr)
+        pad = {"card": T.PAD_CARD, "panel": T.PAD_PANEL,
+               "pillx": T.PAD_CARD}.get(mode, T.PAD_PILL)
+        target_w = w + 2 * pad
+        if mode == "pillx":
+            target_h = T.H_PILL_LG
+        elif mode == "panel":
+            # El panel se ajusta a su contenido: la lista de wifi no mide
+            # lo mismo con dos redes que con cinco.
+            target_h = max(T.H_COMPACT, h + 2 * T.PANEL_PAD)
+        elif mode == "card":
+            target_h = T.H_CARD
+        else:
+            target_h = T.H_COMPACT
+
+        if key != self.state_key:
+            # Cambio de estado: cruza el contenido viejo con el nuevo.
+            self.prev_content = self.content
+            # Las zonas del contenido anterior desaparecen con el; dejar
+            # el realce vivo lo haria quedarse flotando sobre nada.
+            self.hover = None
+            self.sp_ha.snap(0.0)
+            self.sp_fade.snap(0.0)
+            self.sp_fade.set(1.0)
+            self.state_key = key
+        self.content = item
+
+        if self.activities:
+            self._mostrar()
+        if not self.sp_wsx.settled:
+            self.ensure_tick()
+        self._schedule_expiry()
+        self.sp_w.set(target_w)
+        self.sp_h.set(target_h)
+        self.update_input_region()
+        if initial:
+            self.sp_w.snap(target_w)
+            self.sp_h.snap(target_h)
+            self.sp_fade.snap(1.0)
+        self.ensure_tick()
+        self._damage()
+
+    def _schedule_expiry(self):
+        """Temporizador exacto para el repliegue.
+
+        No basta con mirar la caducidad dentro del bucle de animacion:
+        ese bucle se PARA en cuanto los muelles se asientan, asi que una
+        actividad ya expandida y quieta no tendria quien la cerrase, y
+        el repliegue quedaba colgando del tick de reloj -- hasta 1 s
+        tarde. Aqui se programa al milisegundo de su vencimiento.
+        """
+        if self._exp_id is not None:
+            GLib.source_remove(self._exp_id)
+            self._exp_id = None
+        times = [a.expires for a in self.activities.values()
+                 if a.expires is not None]
+        if not times:
+            return
+        delay = max(0.0, min(times) - time.monotonic())
+        self._exp_id = GLib.timeout_add(int(delay * 1000) + 16, self._on_expiry)
+
+    def _on_expiry(self):
+        self._exp_id = None
+        self.refresh()
+        return False
+
+    # --------------------------------------------------------- animacion
+
+    def _damage(self):
+        """Redibuja solo la franja de la isla.
+
+        La ventana mide 2880x460 para que quepa el panel de wifi; pedir
+        el redibujado entero serian 1,3 millones de pixeles por
+        fotograma, a 60 fps, casi todos transparentes. Acotarlo a la
+        zona util baja eso en mas de un orden de magnitud.
+        """
+        cw = max(self.sp_w.value, self.sp_w.target) + 40
+        ch = max(self.sp_h.value, self.sp_h.target) + T.TOP + 40
+        # Union con la zona del fotograma ANTERIOR: al encogerse la isla,
+        # lo que se pinto antes cae fuera de la zona nueva y se quedaria
+        # ahi sin que nadie lo borrase (aparecian restos del contenido
+        # viejo flotando a los lados).
+        w = max(cw, self._prev_dmg[0])
+        h = max(ch, self._prev_dmg[1])
+        self._prev_dmg = (cw, ch)
+        self.queue_draw_area(int((self.W - w) / 2), 0,
+                             int(w) + 1, int(h) + 1)
+
+    def ensure_tick(self):
+        if self._tick_id is None:
+            self._last = time.monotonic()
+            self._tick_id = self.add_tick_callback(self._on_tick)
+
+    def _on_tick(self, widget, clock):
+        now = time.monotonic()
+        dt = now - self._last
+        self._last = now
+
+        # Ciclo de 1.4 s: mas rapido parece nervioso, mas lento no se
+        # lee como progreso.
+        self.anim = (self.anim + dt / 1.4) % 1.0
+
+        moving = False
+        for s in (self.sp_w, self.sp_h, self.sp_fade, self.sp_y,
+                  self.sp_hx, self.sp_hy, self.sp_hw, self.sp_hh, self.sp_ha):
+            moving |= s.step(dt)
+        if self.sp_wsx.step(dt):
+            moving = True
+            # El contenido se construye con el valor del muelle, asi que
+            # hay que rehacerlo: no basta con repintar.
+            self._ws_dirty = True
+
+        # Una actividad puede caducar sin que llegue ningun evento, asi
+        # que hay que mirar el reloj tambien aqui.
+        if self.activities and any(not a.alive(now) for a in self.activities.values()):
+            self.refresh()
+            moving = True
+
+        if getattr(self, "_ws_dirty", False):
+            self._ws_dirty = False
+            self.refresh()
+
+        # Una animacion ciclica no "se asienta" nunca: mientras este en
+        # pantalla hay que seguir pidiendo fotogramas.
+        act = self.current()
+        if act is not None and act.kind == "power" and act.data.get("charging"):
+            moving = True
+
+        self._damage()
+        if not moving:
+            self._tick_id = None
+            self.update_input_region()
+            return False
+        return True
+
+    # --------------------------------------------------------- dibujado
+
+    def geom(self):
+        w = max(self.sp_w.value, T.H_COMPACT)
+        h = self.sp_h.value
+        return (self.W - w) / 2.0, T.TOP + self.sp_y.value, w, h
+
+    # ------------------------------------------------- auto-ocultado
+
+    def _mostrar(self):
+        if self._hide_id:
+            GLib.source_remove(self._hide_id)
+            self._hide_id = None
+        self.oculto = False
+        self.sp_y.set(0.0)
+        self.ensure_tick()
+
+    def _quiza_ocultar(self):
+        """Repliega solo si no hay nada que ensenar.
+
+        Una notificacion o un panel abierto mandan sobre el replegado:
+        ocultar justo cuando acaba de aparecer algo seria perder el
+        aviso.
+        """
+        self._hide_id = None
+        if not T.AUTOHIDE or self.activities or self.hover is not None:
+            return False
+        self.oculto = True
+        self.sp_y.set(-(T.H_COMPACT - T.PEEK))
+        self.ensure_tick()
+        return False
+
+    def _programar_ocultado(self, ms=None):
+        if not T.AUTOHIDE:
+            return
+        if self._hide_id:
+            GLib.source_remove(self._hide_id)
+        self._hide_id = GLib.timeout_add(ms or T.HIDE_MS, self._quiza_ocultar)
+
+    def on_draw(self, widget, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+
+        x, y, w, h = self.geom()
+        # notch(), no capsule(): arriba va recto contra el borde de la
+        # pantalla y solo se redondea abajo. Los filetes cierran el
+        # encuentro con el borde.
+        R.notch(cr, x, y, w, h, min(h / 2.0, T.NOTCH_R), T.FILLET)
+        cr.set_source_rgb(*T.ISLAND)
+        cr.fill_preserve()
+        cr.clip()
+
+        f = max(0.0, min(1.0, self.sp_fade.value))
+        cy = y + h / 2.0
+
+        # Realce de hover, por detras del contenido.
+        ha = max(0.0, min(1.0, self.sp_ha.value)) * f
+        if ha > 0.01 and self.sp_hw.value > 1:
+            R.capsule(cr, self.sp_hx.value, self.sp_hy.value,
+                      self.sp_hw.value, self.sp_hh.value,
+                      min(self.sp_hh.value / 2.0, 22))
+            cr.set_source_rgba(1, 1, 1, T.HOVER_A * ha)
+            cr.fill()
+
+        # El contenido saliente sube y el entrante llega desde abajo: es
+        # el mismo gesto que usa iOS al cambiar de actividad y hace que
+        # el cruce se lea como un relevo, no como un parpadeo.
+        if self.prev_content is not None and f < 0.999:
+            pw, _ = self.prev_content.size(cr)
+            cr.save()
+            cr.translate(0, -10 * f)
+            self.prev_content.draw(cr, x + (w - pw) / 2.0, cy, 1.0 - f)
+            cr.restore()
+
+        # Las zonas sensibles se reinician aqui, despues de pintar el
+        # contenido saliente: si no, durante el cruce quedarian activas
+        # las del contenido que ya se esta yendo y un clic acertaria en
+        # algo que el usuario ya no ve.
+        R.begin_hits()
+        if self.content is not None:
+            cw, _ = self.content.size(cr)
+            cr.save()
+            cr.translate(0, 10 * (1.0 - f))
+            self.content.draw(cr, x + (w - cw) / 2.0, cy, f)
+            cr.restore()
+
+        cr.reset_clip()
+        return False
+
+    def update_input_region(self):
+        """Solo la capsula recibe clics; el resto de la ventana deja
+        pasar el raton a lo que haya debajo."""
+        gw = self.get_window()
+        if gw is None:
+            return
+        # Se usa el maximo entre el valor actual y el de destino: con
+        # solo el actual, durante los ~300 ms de expansion la zona
+        # pulsable iria por detras del dibujo y los clics sobre un panel
+        # recien abierto se perderian.
+        w = max(self.sp_w.value, self.sp_w.target, T.H_COMPACT)
+        h = max(self.sp_h.value, self.sp_h.target, T.H_COMPACT)
+        x = (self.W - w) / 2.0
+        y0 = T.TOP + self.sp_y.value
+        rect = (int(x), int(min(0, y0)), int(math.ceil(w)),
+                int(math.ceil(h + max(0, -y0))))
+        # Cada llamada es un viaje de ida y vuelta al servidor X. Antes
+        # se hacia en cada refresco aunque la geometria fuese identica.
+        if rect == getattr(self, "_last_input_rect", None):
+            return
+        self._last_input_rect = rect
+        reg = cairo.Region(cairo.RectangleInt(*rect))
+        if T.AUTOHIDE:
+            # Franja sensible a todo lo ancho del borde superior: es lo
+            # que permite que el notch vuelva acercando el raton arriba
+            # estando replegado.
+            reg.union(cairo.RectangleInt(0, 0, self.W, T.HOT))
+        gw.input_shape_combine_region(reg, 0, 0)
+
+    def _hit(self, x, y):
+        """Zona bajo el puntero, la MAS ESPECIFICA si hay anidadas.
+
+        Una fila con etiqueta registra la suya antes que la de sus
+        hijos, asi que devolver la primera que casara hacia que el grupo
+        tapase siempre a sus elementos: pulsar un segmento de escritorio
+        acertaba en la fila entera y no en el segmento.
+        """
+        mejor = None
+        for tag, hx, hy, hw, hh in R.get_hits():
+            if hx <= x <= hx + hw and hy <= y <= hy + hh:
+                area = hw * hh
+                if mejor is None or area < mejor[0]:
+                    mejor = (area, tag, (hx, hy, hw, hh))
+        return (mejor[1], mejor[2]) if mejor else (None, None)
+
+    def on_click(self, widget, ev):
+        tag, rect = self._hit(ev.x, ev.y)
+        self._touch_panel()
+        if self._seat is not None:
+            self._arm_guard()
+
+        if tag is None:
+            # Con el puntero capturado esto incluye los clics de FUERA de
+            # la isla, que es como se cierra un menu.
+            if "panel" in self.activities:
+                self._close_panel()
+            else:
+                act = self.current()
+                if act is not None and act.kind in ("notify", "volume",
+                                                    "brightness"):
+                    self.activities.pop(act.kind, None)
+            self.refresh()
+            return True
+
+        if tag == "dnd" or tag == "ds:dnd":
+            controls.dnd_toggle()
+            self.dnd = controls.dnd_paused()
+            self.refresh()
+        elif tag.startswith("ws"):
+            # Clic izquierdo en un segmento: saltar a ese escritorio, que
+            # es lo que cualquiera espera de un indicador pulsable.
+            # Derecho: los ajustes del escritorio.
+            if ev.button == 3:
+                self.open_panel("desktop")
+            elif ":" in tag:
+                controls.bspwm("desktop", "-f", "^%d" % (int(tag[3:]) + 1))
+        elif tag.startswith("ds:"):
+            # Acciones de bspwm. Ninguna cierra el panel: se suelen
+            # encadenar varias (equilibrar y luego ajustar el aire).
+            acc = tag[3:]
+            if acc == "monocle":
+                controls.bspwm("desktop", "-l", "next")
+            elif acc == "balance":
+                controls.bspwm("node", "@/", "-B")
+            elif acc == "rotate":
+                controls.bspwm("node", "@/", "-R", "90")
+            elif acc in ("gap+", "gap-"):
+                g = controls.bspwm_gap() + (4 if acc == "gap+" else -4)
+                controls.bspwm("config", "window_gap", str(max(0, min(60, g))))
+            self._touch_panel()
+            self.refresh()
+        elif tag.startswith("media:"):
+            controls.media(tag[6:])
+            self._touch_panel()
+            GLib.timeout_add(250, lambda: (self.refresh(), False)[1])
+        elif tag in ("vol", "net", "bat", "clock"):
+            self.open_panel({"vol": "volume", "net": "wifi",
+                             "bat": "battery", "clock": "calendar"}[tag])
+        elif tag in ("cal:prev", "cal:next", "cal:hoy"):
+            # Navegar NO cierra el panel, a diferencia de elegir perfil o
+            # red: aqui el clic es para seguir mirando, no una accion
+            # terminal.
+            self.cal_off = (0 if tag == "cal:hoy" else
+                            self.cal_off + (1 if tag == "cal:next" else -1))
+            self._touch_panel()
+            self.refresh()
+        elif tag == "power":
+            self.open_panel("powermenu")
+        elif tag.startswith("act:"):
+            cmd = T.G_POWER_ACTS[int(tag[4:])][2]
+            self._close_panel()
+            self.refresh()
+            GLib.spawn_async(["/bin/sh", "-c", cmd],
+                             flags=GLib.SpawnFlags.SEARCH_PATH)
+        elif tag.startswith("app:"):
+            self.launch["sel"] = int(tag[4:])
+            self._launch_sel()
+        elif tag == "vol-slider":
+            self._drag = "vol-slider"
+            self._slide(ev.x, rect)
+        elif tag == "vol-mute":
+            controls.toggle_mute()
+            GLib.timeout_add(120, self._after_vol)
+        elif tag == "vol-mixer":
+            self._spawn(C.CMD_MIXER)
+            self._close_panel()
+            self.refresh()
+        elif tag.startswith("prof:"):
+            # Elegir perfil es una accion terminal: el panel se cierra,
+            # como al elegir una red.
+            controls.epp_set(tag[5:], self._after_prof)
+            self._close_panel()
+            self.refresh()
+        elif tag.startswith("wifi:"):
+            ssid = tag[5:]
+            secure = any(n[0] == ssid and n[3] for n in (self.wifi_nets or []))
+            if secure and ssid not in self.known:
+                # Red protegida y sin perfil guardado: es el unico caso
+                # en que hace falta la contrasena. Si ya hay perfil,
+                # 'nmcli con up' usa la guardada.
+                self._start_pw(ssid)
+            else:
+                controls.wifi_connect(ssid, self._after_wifi)
+                self._close_panel()
+                self.refresh()
+        return True
+
+    # ------------------------------------------------------------- hover
+
+    @staticmethod
+    def _interactive(tag):
+        if tag is None:
+            return False
+        # El deslizador se excluye a proposito: ya da su propia
+        # respuesta visual al moverse el mando, y un realce detras
+        # ademas le quedaria mas ancho que la propia barra.
+        if tag == "vol-slider":
+            return False
+        return (tag in ("vol", "net", "bat", "power", "vol-mute",
+                        "vol-mixer", "clock")
+                or tag == "dnd" or tag.startswith("ws")
+                or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
+                                   "ds:", "media:")))
+
+    def _set_cursor(self, pointer):
+        if pointer == self._cursor_ptr:
+            return
+        gw = self.get_window()
+        if gw is None:
+            return
+        name = "pointer" if pointer else "default"
+        gw.set_cursor(Gdk.Cursor.new_from_name(self.get_display(), name))
+        self._cursor_ptr = pointer
+
+    def _set_hover(self, tag, rect):
+        if tag == self.hover:
+            return
+        self.hover = tag
+        if tag is None:
+            self.sp_ha.set(0.0)          # se desvanece donde este
+        else:
+            hx, hy, hw, hh = rect
+            if self.sp_ha.value < 0.05:
+                # Primera zona tras entrar: aparece ya colocada, para que
+                # no se vea venir volando desde la posicion anterior.
+                self.sp_hx.snap(hx); self.sp_hy.snap(hy)
+                self.sp_hw.snap(hw); self.sp_hh.snap(hh)
+            else:
+                self.sp_hx.set(hx); self.sp_hy.set(hy)
+                self.sp_hw.set(hw); self.sp_hh.set(hh)
+            self.sp_ha.set(1.0)
+        # Con un panel abierto el contenido depende del hover (el chip
+        # senalado muestra su nombre), asi que hay que reconstruirlo.
+        if tag is not None and tag.startswith("app:") and self.launch:
+            # Apuntar una fila la selecciona, para que raton y teclado
+            # compartan una unica nocion de "el que se va a lanzar".
+            self.launch["sel"] = int(tag[4:])
+        if "panel" in self.activities:
+            self.refresh()
+        self.ensure_tick()
+
+    def on_motion(self, widget, ev):
+        tag, rect = self._hit(ev.x, ev.y)
+
+        if self._drag == "vol-slider" and (ev.state & Gdk.ModifierType.BUTTON1_MASK):
+            for t, hx, hy, hw, hh in R.get_hits():
+                if t == "vol-slider":
+                    self._slide(ev.x, (hx, hy, hw, hh))
+                    break
+            self._touch_panel()
+            return False
+
+        if self._interactive(tag):
+            self._set_hover(tag, rect)
+            self._set_cursor(True)
+            # OJO: aqui NO se aplaza el cierre. Si el mero hecho de tener
+            # el raton encima renovase el plazo, dejar el puntero quieto
+            # sobre el panel lo mantendria abierto para siempre.
+        else:
+            self._set_hover(None, None)
+            self._set_cursor(tag == "vol-slider")
+        return False
+
+    def on_leave(self, widget, ev):
+        # Al salir del raton, ni realce ni cursor de mano.
+        self._set_hover(None, None)
+        self._set_cursor(False)
+        self._programar_ocultado()
+        return False
+
+    def on_release(self, widget, ev):
+        self._drag = None
+        return False
+
+    def _slide(self, x, rect):
+        hx, _hy, hw, _hh = rect
+        # La zona lleva 12px de margen a cada lado para que sea comoda de
+        # pulsar; hay que descontarlos o el 0% y el 100% caerian fuera
+        # del recorrido real de la barra.
+        pad = 12
+        frac = (x - (hx + pad)) / max(1.0, hw - 2 * pad)
+        frac = max(0.0, min(1.0, frac))
+        controls.set_volume(frac)
+        self.sys.volume = int(round(frac * 100))
+        self.sys.muted = False
+        self.refresh()
+
+    def _after_vol(self):
+        self.sys.refresh()
+        self.refresh()
+        return False
+
+    def _after_prof(self, ok, mode):
+        if not ok:
+            self.on_event({"kind": "notify", "app": "Energia",
+                           "body": "No se pudo aplicar el perfil"})
+        self.refresh()
+        return False
+
+    def _after_wifi(self, ok, ssid, msg=""):
+        self.sys.refresh()
+        if not ok and msg == "bad-password":
+            # Se vuelve al campo con el aviso en vez de cerrar: reabrir
+            # el panel y buscar otra vez la red seria un castigo por
+            # una errata.
+            self._start_pw(ssid)
+            if self.pw is not None:
+                self.pw["error"] = True
+                self.refresh()
+            return False
+        self.on_event({
+            "kind": "notify", "app": "Wi-Fi",
+            "body": ("Conectado a %s" % ssid) if ok
+                    else ("No se pudo conectar a %s" % ssid)})
+        return False
+
+
+def main():
+    # WM_CLASS sale de prgname (instancia) y program_class (clase), y hay
+    # que fijarlos ANTES de crear la ventana. Es lo que usan las reglas de
+    # picom para excluir la isla del blur y de la sombra. La alternativa,
+    # Gtk.Window.set_wmclass(), esta deprecada y ademas no surte efecto si
+    # se llama despues de realizar la ventana.
+    GLib.set_prgname("island")
+    Gdk.set_program_class("Island")
+    win = Island()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
