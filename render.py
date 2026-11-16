@@ -745,3 +745,101 @@ class WsBar(object):
         capsule(cr, px, cy - T.SEG_H / 2.0, pw, T.SEG_H, T.SEG_H / 2.0)
         cr.set_source_rgba(*T.ACCENT, a * alfa)
         cr.fill()
+
+
+class Wave(object):
+    """Onda del microfono: una barra por muestra reciente, la nueva a la
+    derecha.
+
+    Es la señal REAL que entra, no una animacion decorativa. La
+    diferencia importa: con una onda falsa, un micro silenciado o un
+    cable suelto se ven exactamente igual que una grabacion buena, y te
+    enteras treinta segundos despues, al leer la transcripcion vacia.
+
+    Las barras viejas se van apagando hacia la izquierda. Eso da la
+    sensacion de desplazamiento sin mover nada: lo unico que cambia
+    entre fotogramas es la altura y el alfa de cada barra, que es
+    bastante mas barato que desplazar un trazado.
+    """
+    def __init__(self, levels, color, n, w, gap, hmax, hmin):
+        self.levels = levels
+        self.color = color
+        self.n, self.w, self.gap = n, w, gap
+        self.hmax, self.hmin = hmax, hmin
+
+    def size(self, cr):
+        return self.n * self.w + (self.n - 1) * self.gap, self.hmax
+
+    def draw(self, cr, x, cy, a):
+        # Se pinta siempre el mismo numero de barras: con menos muestras
+        # que barras, las que faltan van a la izquierda y en silencio,
+        # asi que la onda "entra" en vez de aparecer de golpe.
+        faltan = self.n - len(self.levels)
+        vals = [0.0] * max(0, faltan) + list(self.levels)[-self.n:]
+        for i, v in enumerate(vals):
+            h = self.hmin + (self.hmax - self.hmin) * max(0.0, min(1.0, v))
+            # La mas nueva a plena luz; las viejas se apagan, pero nunca
+            # del todo: a cero parecerian un hueco en la onda.
+            alfa = (0.45 + 0.55 * (i + 1) / float(self.n)) * a
+            cr.set_source_rgba(*self.color, alfa)
+            capsule(cr, x + i * (self.w + self.gap), cy - h / 2.0,
+                    self.w, h, self.w / 2.0)
+            cr.fill()
+
+
+class Pulse(object):
+    """Tres puntos que laten por turnos: 'esto esta trabajando'.
+
+    Se usa mientras transcribe, que es el unico tramo en el que la isla
+    no tiene nada que contar y no se sabe cuanto va a durar. Una barra
+    de progreso mentiria, porque whisper no informa de su avance.
+    """
+    def __init__(self, phase, color, r=5, gap=9, n=3):
+        self.phase, self.color = phase % 1.0, color
+        self.r, self.gap, self.n = r, gap, n
+
+    def size(self, cr):
+        return self.n * 2 * self.r + (self.n - 1) * self.gap, 2 * self.r
+
+    def draw(self, cr, x, cy, a):
+        for i in range(self.n):
+            # Un tercio de ciclo de desfase entre puntos: el ojo lee la
+            # secuencia como un desplazamiento, no como tres parpadeos.
+            f = (self.phase - i / float(self.n)) % 1.0
+            alfa = (0.25 + 0.75 * (0.5 - 0.5 * math.cos(2 * math.pi * f))) * a
+            cr.set_source_rgba(*self.color, alfa)
+            cr.arc(x + i * (2 * self.r + self.gap) + self.r, cy, self.r,
+                   0, 2 * math.pi)
+            cr.fill()
+
+
+class Alfa(object):
+    """Envuelve a otro elemento y lo dibuja con su alfa multiplicado.
+
+    Sirve para que una pieza suelta entre con un fundido propio sin
+    tocar el del resto del contenido. No cambia el tamaño: el hueco ya
+    esta reservado desde el primer fotograma, asi que la fila no se
+    recoloca mientras aparece.
+
+    `k` puede ser un numero o cualquier cosa con `.value` (un muelle).
+    Lo segundo es lo normal aqui: el contenido NO se reconstruye en cada
+    fotograma, asi que un numero capturado al construir dejaria el
+    fundido congelado en su primer valor.
+    """
+    def __init__(self, hijo, k):
+        self.hijo = hijo
+        self.k = k
+
+    def _alfa(self):
+        k = self.k
+        k = k.value if hasattr(k, "value") else k
+        return max(0.0, min(1.0, k))
+
+    def size(self, cr):
+        return self.hijo.size(cr)
+
+    def draw(self, cr, x, cy, a):
+        k = self._alfa()
+        if k <= 0.001:
+            return
+        self.hijo.draw(cr, x, cy, a * k)

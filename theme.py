@@ -184,6 +184,8 @@ G_LOCK    = ""
 G_MUSIC   = ""
 G_SUN     = ""
 G_MIC_OFF = ""
+G_MIC     = "\uf130"
+G_CHECK   = "\uf00c"
 
 
 # Perfiles de energia. Iconos en vez de los nombres completos:
@@ -242,6 +244,7 @@ ICON_GLYPH = {
     "bat-3": G_BAT[3], "bat-4": G_BAT[4], "bolt": G_BOLT,
     "power": G_POWER, "lock": G_LOCK, "bell": G_BELL, "bell-off": "\uf1f6",
     "music": G_MUSIC, "search": G_SEARCH, "sun": G_SUN,
+    "mic": G_MIC, "mic-off": G_MIC_OFF, "check": G_CHECK,
     "prev": "\uf053", "next": "\uf054",
     "prof-auto": "\uf021", "prof-perf": "\uf135",
     "prof-bal": "\uf24e", "prof-save": "\uf06c",
@@ -253,3 +256,22 @@ ICON_GLYPH = {
     "monocle": "\uf2d0", "balance": "\uf07e", "rotate": "\uf01e",
     "gap-plus": "\uf065", "gap-minus": "\uf066",
 }
+
+
+# ---------------------------------------------------------------------
+# Dictado
+#
+# La onda son barras de la senal REAL del micro, no una animacion
+# decorativa: si no entra audio se queda plana, y eso es justo lo que
+# hay que ver antes de hablar treinta segundos para nada.
+# ---------------------------------------------------------------------
+DICT_BARS    = 18     # barras visibles de la onda
+DICT_BAR_W   = 5
+DICT_BAR_GAP = 4
+DICT_BAR_H   = 34     # alto maximo de una barra
+DICT_BAR_MIN = 4      # alto en silencio: la onda no desaparece del todo
+DICT_COLOR   = RED    # grabando. El rojo es la convencion universal
+DICT_WORK    = ACCENT # transcribiendo
+DICT_OK      = GREEN  # texto listo
+# Texto transcrito que cabe en la tarjeta antes de recortar.
+DICT_MAXTXT  = 78

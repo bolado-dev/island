@@ -162,6 +162,129 @@ class Bspwm(object):
             self.focused = focused
 
 
+# --------------------------------------------------------------- foco
+
+def _arbol_tiene(pid, nombre):
+    """True si `pid` o alguno de sus descendientes se llama `nombre`.
+
+    Un solo `ps` y se recorre el arbol en memoria: lanzar uno por nivel
+    seria mas lento justo en el momento sensible, que es el cambio de
+    foco.
+    """
+    try:
+        salida = subprocess.run(["ps", "-eo", "pid=,ppid=,comm="],
+                                capture_output=True, text=True,
+                                timeout=2).stdout
+    except Exception:
+        return False
+    hijos, nombres = {}, {}
+    for linea in salida.split("\n"):
+        campos = linea.split(None, 2)
+        if len(campos) != 3:
+            continue
+        try:
+            hijo, padre = int(campos[0]), int(campos[1])
+        except ValueError:
+            continue
+        hijos.setdefault(padre, []).append(hijo)
+        nombres[hijo] = campos[2]
+    pila, visto = [pid], set()
+    while pila:
+        p = pila.pop()
+        if p in visto:
+            continue
+        visto.add(p)
+        if nombre in nombres.get(p, "").lower():
+            return True
+        pila.extend(hijos.get(p, []))
+    return False
+
+
+def ventana_enfocada():
+    """Quien tiene el foco: id, clase, nombre legible y si es Claude.
+
+    Para Claude Code no sirve el titulo: la terminal lo cambia a lo que
+    este haciendo la conversacion, asi que dice de QUE va la ventana
+    pero no de que programa es. Lo que si lo dice es el arbol de
+    procesos: si de esa ventana cuelga un proceso que se llama claude,
+    es Claude Code.
+    """
+    def _run(cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=2).stdout.strip()
+        except Exception:
+            return ""
+
+    wid = _run(["bspc", "query", "-N", "-n", "focused"])
+    if not wid:
+        return {"id": "", "clase": "", "app": "", "claude": False}
+    clase, pid = "", 0
+    for linea in _run(["xprop", "-id", wid, "WM_CLASS", "_NET_WM_PID"]).split("\n"):
+        if linea.startswith("WM_CLASS"):
+            partes = [x.strip().strip('"')
+                      for x in linea.split("=", 1)[-1].split(",")]
+            clase = (partes[-1] or partes[0]).strip().lower()
+        elif linea.startswith("_NET_WM_PID"):
+            try:
+                pid = int(linea.split("=")[-1])
+            except ValueError:
+                pid = 0
+    claude = bool(pid) and _arbol_tiene(pid, "claude")
+    app = "Claude" if claude else {
+        "kitty": "Terminal", "google-chrome": "Chrome",
+        "chromium": "Chromium"}.get(clase, clase)
+    return {"id": wid, "clase": clase, "app": app, "claude": claude}
+
+
+class Foco(object):
+    """Ventana enfocada, en vivo via 'bspc subscribe node_focus'.
+
+    Existe para una sola cosa: que el notch pueda decir que el dictado
+    esta disponible cuando miras una ventana de Claude. Por eso NO
+    sondea: recorrer el arbol de procesos cada pocos segundos para un
+    indicador que casi nunca cambia seria gastar bateria en nada. Se
+    mira cuando el foco cambia, que es la unica vez que puede cambiar
+    la respuesta.
+    """
+    def __init__(self, on_change):
+        self.on_change = on_change
+        self.info = {"id": "", "clase": "", "app": "", "claude": False}
+        self.proc = None
+        self.refrescar()
+        self.start()
+
+    def start(self):
+        try:
+            self.proc = subprocess.Popen(
+                ["bspc", "subscribe", "node_focus"],
+                stdout=subprocess.PIPE, text=True, bufsize=1)
+        except OSError:
+            return
+        GLib.io_add_watch(self.proc.stdout, GLib.PRIORITY_DEFAULT,
+                          GLib.IO_IN | GLib.IO_HUP, self._on_line)
+
+    def _on_line(self, src, cond):
+        if cond & GLib.IO_HUP:
+            return False
+        if not src.readline():
+            return False
+        antes = self.info.get("claude")
+        self.refrescar()
+        # Solo molesta a la isla si CAMBIA la respuesta: alt-tab entre
+        # dos ventanas que no son Claude no tiene por que repintar nada.
+        if self.info.get("claude") != antes:
+            self.on_change()
+        return True
+
+    def refrescar(self):
+        self.info = ventana_enfocada()
+
+    @property
+    def claude(self):
+        return bool(self.info.get("claude"))
+
+
 # --------------------------------------------------------------- fifo
 
 class Fifo(object):

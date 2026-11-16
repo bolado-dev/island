@@ -52,3 +52,27 @@ VPN_LABEL_FILE = os.path.expanduser("~/.config/island/vpn-label")
 # otra forma (ip -br link).
 IFACE_WIFI = "wlan0"
 IFACE_VPN  = "tun0"
+
+
+# --------------------------------------------------------------- dictado
+# Dictado por voz (dictado.py). El binario y el modelo viven fuera del
+# repo a proposito: son 181 MB y un ejecutable compilado para ESTA
+# maquina, no configuracion que se pueda versionar.
+#
+#   git clone https://github.com/ggml-org/whisper.cpp ~/.local/share/whisper.cpp
+#   cd ~/.local/share/whisper.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release
+#   cmake --build build -j
+#   ./models/download-ggml-model.sh small-q5_1
+#
+# El modelo se eligio midiendo en esta maquina, sin GPU: `small-q5_1`
+# transcribe 11 s de audio en 2,9 s (unas 4 veces mas rapido que hablar)
+# y `large-v3-turbo-q5_0` tarda 18,7 s, o sea mas que la propia frase.
+DICT_WHISPER = "~/.local/share/whisper.cpp/build/bin/whisper-cli"
+DICT_MODEL   = "~/.local/share/whisper.cpp/models/ggml-small-q5_1.bin"
+DICT_LANG    = "es"
+# 10 de los 12 nucleos: dejar dos libres evita que la transcripcion
+# atragante al propio escritorio mientras dibuja la onda.
+DICT_THREADS = 10
+# Tope de grabacion. Si algo se queda colgado, que no grabe toda la
+# noche: son 120 s de audio y de disco por cada pulsacion olvidada.
+DICT_MAX_S   = 120

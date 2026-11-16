@@ -125,6 +125,60 @@ sería ejecutar código arbitrario.
   <img src="docs/music.png" alt="Tarjeta de reproducción con carátula, título, artista y controles de anterior, pausa y siguiente" width="520">
 </p>
 
+**Dictado por voz.** Mantén `super + v`, habla y suéltala: la isla se
+despliega con la onda del micrófono, transcribe en local y escribe el texto
+donde estabas. `super + shift + v` es el mismo dictado como interruptor, para
+hablar largo sin tener la mano en la tecla.
+
+Tres cosas que no son obvias:
+
+**La onda es la señal real**, no una animación. Con una decorativa, un micro
+silenciado se ve exactamente igual que una grabación buena, y te enteras
+treinta segundos después al leer la transcripción vacía. Lo que sí es
+animación es cómo llega: los niveles entran doce veces por segundo y la
+pantalla va a sesenta, así que lo dibujado persigue a lo medido en vez de
+copiarlo. Sin eso la onda avanza a saltos de cinco fotogramas, que es el tirón
+que delata a una barra de sonido mal hecha.
+
+**La ventana de destino se mira al empezar, no al terminar.** Mientras hablas
+el foco puede cambiar solo —una notificación, un gesto del ratón— y el texto
+acabaría escrito en cualquier parte. Al soltar, el texto va a la ventana que
+tenías delante cuando empezaste.
+
+**El notch avisa de que el dictado está disponible.** Cuando el foco entra en
+una ventana de Claude aparece en reposo un micrófono azul con la palabra
+«Dictado», y se va cuando el foco sale. Mismo criterio que el «no molestar»:
+aparece solo cuando significa algo, porque un icono permanente para un estado
+que casi siempre está apagado es ruido fijo. El foco se consulta cuando
+cambia (`bspc subscribe node_focus`), no en bucle: recorrer el árbol de
+procesos cada pocos segundos para un indicador que casi nunca cambia sería
+gastar batería en nada.
+
+**Reconoce las ventanas de Claude y lo dice en azul.** No por el título: una
+terminal con Claude Code dentro se titula con lo que esté haciendo la
+conversación, así que el título no identifica al programa. Lo que sí lo
+identifica es el árbol de procesos de esa ventana. El texto se escribe igual
+en cualquier sitio; el azul es para saber a dónde va antes de soltar la tecla.
+
+**El texto se pega, no se teclea.** Medido aquí: `xdotool type` se come las
+vocales acentuadas ("grabe video" por "grabé vídeo"), porque remapea un código
+de tecla por cada carácter que el teclado no tiene y con el retardo por
+defecto el servidor X todavía no ha procesado el mapa nuevo cuando llega la
+pulsación. Con `--delay 12` sale bien, pero una frase de 300 caracteres tarda
+casi cuatro segundos en aparecer. Pegar no tiene ninguno de los dos problemas:
+0,1 s y el portapapeles no pasa por el mapa de teclado. El atajo depende de
+dónde se pega, y esa es toda la lista que hay que mantener: Ctrl+Shift+V en
+las terminales, Ctrl+V en lo demás.
+
+Transcribe [whisper.cpp](https://github.com/ggml-org/whisper.cpp) en la
+máquina, sin red. El modelo se elige midiendo, no por fama: en un portátil sin
+GPU, `small-q5_1` transcribe 11 segundos de audio en 2,9 y `large-v3-turbo`
+tarda 18,7, o sea más que la propia frase. Está en `config.py`.
+
+Lo que no hace, a propósito: **el micrófono no se abre solo nunca**. Se abre
+cuando pulsas la tecla y se cierra cuando la sueltas. Un dictado que escucha
+"por si acaso" es un micro abierto en tu escritorio todo el día.
+
 ## Cómo funciona
 
 Una ventana `DOCK` transparente a todo el ancho, pegada arriba. No se
@@ -171,6 +225,28 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-rsvg-2.0
 Opcionales, según lo que quieras que funcione: `playerctl` (reproducción),
 `nmcli` (wifi), `wpctl` de PipeWire (volumen), `dunst` (notificaciones),
 `xclip` (copiar desde la calculadora).
+
+Para el dictado hacen falta además `pw-record` (PipeWire), `xclip`, `xdotool`
+(sin él el texto se queda en el portapapeles en vez de escribirse solo) y
+whisper.cpp compilado:
+
+```sh
+git clone https://github.com/ggml-org/whisper.cpp ~/.local/share/whisper.cpp
+cd ~/.local/share/whisper.cpp
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+./models/download-ggml-model.sh small-q5_1
+```
+
+Y el atajo, en tu `sxhkdrc`. El soltado es un atajo distinto (`@`), que es lo
+que lo convierte en push-to-talk de verdad:
+
+```
+super + v
+	~/.config/island/dictado.py start
+
+@super + v
+	~/.config/island/dictado.py stop
+```
 
 ```sh
 git clone https://github.com/bolado-dev/island ~/.config/island

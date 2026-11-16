@@ -14,6 +14,7 @@ import time
 import math
 import locale
 import calendar
+from collections import deque
 import datetime
 import gi
 
@@ -111,7 +112,20 @@ class Island(Gtk.Window):
         self.sys = sources.SystemInfo()
         self.bspwm = sources.Bspwm(self._on_bspwm)
         self.player = sources.Player(self._on_player)
+        # Que ventana tiene el foco, para avisar de que el dictado esta
+        # disponible. Solo se consulta cuando el foco cambia (ver
+        # sources.Foco), no en bucle.
+        self.foco = sources.Foco(self._on_foco)
         self.activities = {}
+        # Ultimos niveles del microfono, para la onda del dictado. Tope
+        # fijo: es una ventana deslizante, no un historial.
+        self.dict_levels = deque(maxlen=T.DICT_BARS)
+        # Lo que se DIBUJA, que persigue a dict_levels. Los niveles
+        # llegan doce veces por segundo y la pantalla va a sesenta: sin
+        # esta segunda lista la onda avanzaria a saltos de cinco
+        # fotogramas, que es justo el tiron que se ve en una barra de
+        # sonido mal hecha.
+        self.dict_shown = deque(maxlen=T.DICT_BARS)
         self.wifi_nets = None
         self.cal_off = 0          # meses de desplazamiento respecto a hoy
         self.dnd = False          # dunst en pausa
@@ -160,6 +174,10 @@ class Island(Gtk.Window):
         self.sp_hw = Spring(0, response=0.20, damping=0.95)
         self.sp_hh = Spring(0, response=0.20, damping=0.95)
         self.sp_ha = Spring(0, response=0.16, damping=1.0)
+        # Entrada del indicador de dictado disponible. Con rebote (0.7):
+        # es un aviso de que algo se ha encendido, y un pequeño remate
+        # al llegar lo hace notar sin tener que parpadear para siempre.
+        self.sp_mic = Spring(0.0, response=0.34, damping=0.70)
         self._cursor_ptr = None
         self.fifo = sources.Fifo(FIFO, self.on_event)
 
@@ -317,6 +335,11 @@ class Island(Gtk.Window):
         sources.fetch_art(url, 56, got)
         self.refresh()
 
+    def _on_foco(self):
+        # Solo llega cuando la respuesta CAMBIA (ver sources.Foco), asi
+        # que no hace falta comparar nada aqui.
+        self.refresh()
+
     def on_event(self, ev):
         kind = ev.get("kind", "notify")
         if kind == "panel":
@@ -329,6 +352,32 @@ class Island(Gtk.Window):
             self.activities.pop(ev.get("target", ""), None)
             self.refresh()
             return
+        if kind == "dictado":
+            # El dictado manda sobre todo lo demas mientras dura: lo
+            # acabas de pulsar tu y estas hablando a la maquina. Y es la
+            # unica actividad que NO caduca sola mientras esta en
+            # marcha, porque no se sabe cuanto vas a hablar.
+            estado = ev.get("state") or "oyendo"
+            if estado == "oyendo":
+                self.dict_levels.append(float(ev.get("value") or 0.0))
+                # La barra nueva nace a la altura de la anterior y sube
+                # desde ahi: apareciendo a cero, cada muestra empezaria
+                # con un parpadeo hacia abajo.
+                self.dict_shown.append(
+                    self.dict_shown[-1] if self.dict_shown else 0.0)
+            elif estado == "transcribiendo":
+                # La onda se congela tal cual estaba: borrarla aqui
+                # haria parpadear la tarjeta justo en el cambio.
+                pass
+            else:
+                self.dict_levels.clear()
+                self.dict_shown.clear()
+            ttl = None if estado in ("oyendo", "transcribiendo") else \
+                (6.0 if estado == "listo" else 3.0)
+            self.activities["dictado"] = Activity("dictado", 60, ttl, ev, "card")
+            self.refresh()
+            return
+
         spec = {
             "volume":     (30, 1.8, "pillx"),
             "brightness": (30, 1.8, "pillx"),
@@ -406,6 +455,11 @@ class Island(Gtk.Window):
         if act is None:
             return "idle", "pill", self.build_idle(cr)
         key = act.kind
+        if act.kind == "dictado":
+            # Cada nivel de la onda llega como un evento; si la clave
+            # cambiara con el, la isla haria un fundido cruzado doce
+            # veces por segundo. Lo que si cruza es el cambio de fase.
+            key = "dictado:" + str(act.data.get("state") or "oyendo")
         if act.kind == "panel":
             # La clave distingue CADA panel, no solo "es un panel": si no,
             # pasar de la lista de wifi al campo de contrasena no cuenta
@@ -470,6 +524,21 @@ class Island(Gtk.Window):
         row.add(ws)
 
         row.add(R.Gap(T.GAP_GROUP))
+        # Dictado disponible. Mismo criterio que el "no molestar" de
+        # abajo: aparece solo cuando significa algo. Un icono permanente
+        # para un estado que casi siempre esta apagado es ruido fijo.
+        quiere = 1.0 if self.foco.claude else 0.0
+        if self.sp_mic.target != quiere:
+            self.sp_mic.set(quiere)
+            self.ensure_tick()
+        if self.sp_mic.value > 0.01 or self.foco.claude:
+            row.add(R.Row([R.Alfa(R.Row([
+                self._ico("mic", 24, T.ACCENT, T.G_MIC),
+                R.Gap(7),
+                R.Text("Dictado", T.F_SMALL, T.ACCENT),
+            ]), self.sp_mic)], tag="dictado"))
+            row.add(R.Gap(T.GAP_GROUP))
+            self._mic_en_fila = True
         # Solo aparece cuando esta activo: un icono permanente para un
         # estado que casi siempre esta apagado seria ruido fijo.
         if self.dnd:
@@ -549,6 +618,52 @@ class Island(Gtk.Window):
             return R.Row().add(
                 self._ico("bat-0", 34, T.RED, T.G_BAT[0]), R.Gap(16),
                 R.Text("Bateria %d%%" % d.get("pct", 0), T.F_TITLE, T.RED))
+
+        if k == "dictado":
+            estado = d.get("state") or "oyendo"
+            destino = d.get("app") or ""
+            es_claude = bool(d.get("claude"))
+
+            if estado == "oyendo":
+                fila = R.Row().add(
+                    self._ico("mic", 30, T.DICT_COLOR, T.G_MIC),
+                    R.Gap(16),
+                    R.Wave(self.dict_shown, T.DICT_COLOR, T.DICT_BARS,
+                           T.DICT_BAR_W, T.DICT_BAR_GAP,
+                           T.DICT_BAR_H, T.DICT_BAR_MIN),
+                    R.Gap(18),
+                    R.Text("Escuchando", T.F_TITLE, T.FG))
+            elif estado == "transcribiendo":
+                fila = R.Row().add(
+                    self._ico("mic", 30, T.DICT_WORK, T.G_MIC),
+                    R.Gap(16),
+                    R.Text("Transcribiendo", T.F_TITLE, T.FG),
+                    R.Gap(16),
+                    R.Pulse(self.anim, T.DICT_WORK))
+            elif estado == "listo":
+                fila = R.Row().add(
+                    self._ico("check", 26, T.DICT_OK, T.G_CHECK),
+                    R.Gap(14),
+                    R.Text(self._clip(d.get("text") or "", T.DICT_MAXTXT),
+                           T.F_BODY, T.FG))
+            else:
+                # Un fallo tiene que distinguirse de "no dijiste nada":
+                # el mensaje lo manda quien lo sabe, que es el ayudante.
+                fila = R.Row().add(
+                    self._ico("mic-off", 28, T.DIM, T.G_MIC_OFF),
+                    R.Gap(14),
+                    R.Text(d.get("text") or "Sin audio", T.F_TITLE, T.DIM))
+
+            # A donde va el texto. En una ventana de Claude se pinta en
+            # azul: es la diferencia entre "esto se va a escribir solo"
+            # y "esto se queda en el portapapeles".
+            if destino and estado != "transcribiendo":
+                fila.add(R.Gap(T.GAP_ITEM),
+                         R.Text("\u00b7", T.F_SUB, T.DIM2),
+                         R.Gap(T.GAP_ITEM),
+                         R.Text(destino, T.F_SUB,
+                                T.ACCENT if es_claude else T.DIM))
+            return fila
 
         if k == "music":
             art = d.get("art")
@@ -1357,6 +1472,29 @@ class Island(Gtk.Window):
         for s in (self.sp_w, self.sp_h, self.sp_fade, self.sp_y,
                   self.sp_hx, self.sp_hy, self.sp_hw, self.sp_hh, self.sp_ha):
             moving |= s.step(dt)
+
+        # Indicador de dictado. Se mira aparte del resto para enterarse
+        # de CUANDO se asienta: mientras se desvanece sigue ocupando su
+        # sitio en la fila, asi que el notch no puede encogerse hasta
+        # que desaparece del todo, y eso pide una reconstruccion.
+        movio = self.sp_mic.step(dt)
+        moving |= movio
+        if (not movio and self.sp_mic.target == 0.0
+                and getattr(self, "_mic_en_fila", False)):
+            self._mic_en_fila = False
+            self.refresh()
+
+        # La onda persigue a los niveles que manda el microfono. Llegan
+        # doce veces por segundo y esto corre a sesenta: sin perseguir,
+        # la onda avanzaria a saltos de cinco fotogramas.
+        if len(self.dict_shown) == len(self.dict_levels):
+            k = min(1.0, dt * 18.0)
+            for i, (visto, objetivo) in enumerate(zip(self.dict_shown,
+                                                      self.dict_levels)):
+                nuevo = visto + (objetivo - visto) * k
+                if abs(nuevo - visto) > 0.002:
+                    moving = True
+                self.dict_shown[i] = nuevo
         if T.WS_ANIM and self.sp_wsx.step(dt):
             moving = True
             # El contenido se construye con el valor del muelle, asi que
@@ -1380,6 +1518,11 @@ class Island(Gtk.Window):
         # pantalla hay que seguir pidiendo fotogramas.
         act = self.current()
         if act is not None and act.kind == "power" and act.data.get("charging"):
+            moving = True
+        # Mientras se dicta tampoco se asienta nada: la onda la mueve el
+        # microfono y los puntos de "transcribiendo" laten solos.
+        if act is not None and act.kind == "dictado" and \
+                (act.data.get("state") or "oyendo") in ("oyendo", "transcribiendo"):
             moving = True
 
         self._damage()
