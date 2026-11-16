@@ -140,6 +140,15 @@ pantalla va a sesenta, así que lo dibujado persigue a lo medido en vez de
 copiarlo. Sin eso la onda avanza a saltos de cinco fotogramas, que es el tirón
 que delata a una barra de sonido mal hecha.
 
+**Sube rápido y baja despacio.** Grabando, la onda tiene que seguir a la voz
+sin retraso o deja de ser la señal. Al soltar la tecla pasa lo contrario: lo
+que quieres es *ver* cómo se cierra el micrófono, y a la velocidad de subida
+eso dura 200 ms, o sea nada. Cayendo tarda 400. Y no se cambia de tarjeta: el
+icono, la onda y el texto se quedan donde estaban mientras la onda baja, el
+color pasa de rojo a azul y «Escuchando» se funde en «Transcribiendo», así que
+soltar se lee como otra fase de lo mismo y no como que algo ha sustituido a
+otra cosa.
+
 **La ventana de destino se mira al empezar, no al terminar.** Mientras hablas
 el foco puede cambiar solo —una notificación, un gesto del ratón— y el texto
 acabaría escrito en cualquier parte. Al soltar, el texto va a la ventana que
@@ -182,6 +191,30 @@ Transcribe [whisper.cpp](https://github.com/ggml-org/whisper.cpp) en la
 máquina, sin red. El modelo se elige midiendo, no por fama: en un portátil sin
 GPU, `small-q5_1` transcribe 11 segundos de audio en 2,9 y `large-v3-turbo`
 tarda 18,7, o sea más que la propia frase. Está en `config.py`.
+
+**La ventana del codificador se ajusta a lo que has hablado**, y es la
+optimización más grande que admite esto. Whisper codifica siempre 30 segundos:
+hables dos o veinte, esa parte cuesta lo mismo. Recortándola (`-ac`) a los
+segundos que de verdad hay, medido aquí con `small`:
+
+| | Ventana entera | Ajustada |
+|---|---|---|
+| 2,5 s de audio | 2488 ms | **918 ms** |
+| 11 s de audio | 4934 ms | **3075 ms** |
+
+Con el mismo texto, coma a coma. El margen del 35% tampoco es por gusto:
+quedarse corto recorta el audio y se pierden las últimas palabras, que es un
+fallo mucho peor que tardar un poco más.
+
+De punta a punta, desde que sueltas la tecla: 4 ms en cerrar el micrófono,
+716 en transcribir y 133 en pegar. Con `ISLAND_DEBUG=1` esos tres números se
+escriben en `$XDG_RUNTIME_DIR/island-dictado/traza.log`, que es la única forma
+de saber dónde se va el tiempo: el que graba es un proceso suelto sin terminal
+a la que quejarse.
+
+Y mientras grabas, un nivel nuevo **no reconstruye el contenido del notch**:
+la onda lee la lista en vivo al dibujar, así que doce veces por segundo solo
+se repinta, no se vuelve a medir con Pango un texto que no ha cambiado.
 
 Lo que no hace, a propósito: **el micrófono no se abre solo nunca**. Se abre
 cuando pulsas la tecla y se cierra cuando la sueltas. Un dictado que escucha

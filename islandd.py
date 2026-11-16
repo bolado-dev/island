@@ -366,14 +366,32 @@ class Island(Gtk.Window):
                 self.dict_shown.append(
                     self.dict_shown[-1] if self.dict_shown else 0.0)
             elif estado == "transcribiendo":
-                # La onda se congela tal cual estaba: borrarla aqui
-                # haria parpadear la tarjeta justo en el cambio.
-                pass
+                # La onda no se borra ni se congela: se le pone objetivo
+                # cero y CAE sola hasta la linea base, porque el
+                # suavizado de _on_tick ya la lleva a donde apunte. Al
+                # soltar la tecla se ve lo que de verdad ha pasado, que
+                # el microfono se ha cerrado, en vez de un corte seco
+                # entre dos tarjetas distintas.
+                for i in range(len(self.dict_levels)):
+                    self.dict_levels[i] = 0.0
             else:
                 self.dict_levels.clear()
                 self.dict_shown.clear()
             ttl = None if estado in ("oyendo", "transcribiendo") else \
                 (6.0 if estado == "listo" else 3.0)
+
+            # Un nivel nuevo con el dictado ya en marcha no cambia ni un
+            # texto ni el ancho: lo unico que se mueve es la onda, y la
+            # onda lee la lista EN VIVO al dibujar. Reconstruir aqui el
+            # contenido seria medir con Pango doce veces por segundo
+            # unas cadenas que no han cambiado.
+            act = self.activities.get("dictado")
+            if (estado == "oyendo" and act is not None
+                    and (act.data.get("state") or "oyendo") == "oyendo"):
+                act.data = ev
+                self.ensure_tick()
+                return
+
             self.activities["dictado"] = Activity("dictado", 60, ttl, ev, "card")
             self.refresh()
             return
@@ -639,9 +657,17 @@ class Island(Gtk.Window):
                     R.Gap(18),
                     R.Text("Escuchando", T.F_TITLE, T.FG))
             elif estado == "transcribiendo":
+                # Misma forma que "escuchando" a proposito: el icono, la
+                # onda y el texto siguen en su sitio, asi que el cambio
+                # se lee como que esto sigue siendo lo mismo en otra
+                # fase, y no como que una tarjeta ha sustituido a otra.
                 fila = R.Row().add(
                     self._ico("mic", 30, T.DICT_WORK, T.G_MIC),
                     R.Gap(16),
+                    R.Wave(self.dict_shown, T.DICT_WORK, T.DICT_BARS,
+                           T.DICT_BAR_W, T.DICT_BAR_GAP,
+                           T.DICT_BAR_H, T.DICT_BAR_MIN),
+                    R.Gap(18),
                     R.Text("Transcribiendo", T.F_TITLE, T.FG),
                     R.Gap(16),
                     R.Pulse(self.anim, T.DICT_WORK))
@@ -1488,6 +1514,7 @@ class Island(Gtk.Window):
         # de CUANDO se asienta: mientras se desvanece sigue ocupando su
         # sitio en la fila, asi que el notch no puede encogerse hasta
         # que desaparece del todo, y eso pide una reconstruccion.
+        act = self.current()
         movio = self.sp_mic.step(dt)
         moving |= movio
         if (not movio and self.sp_mic.target == 0.0
@@ -1498,8 +1525,15 @@ class Island(Gtk.Window):
         # La onda persigue a los niveles que manda el microfono. Llegan
         # doce veces por segundo y esto corre a sesenta: sin perseguir,
         # la onda avanzaria a saltos de cinco fotogramas.
+        #
+        # Sube rapido y baja despacio, y la asimetria es deliberada:
+        # grabando, la onda tiene que seguir a la voz sin retraso o deja
+        # de ser la señal; al soltar, lo que se quiere es VER como el
+        # microfono se cierra, y a 18 eso dura 200 ms, o sea nada.
         if len(self.dict_shown) == len(self.dict_levels):
-            k = min(1.0, dt * 18.0)
+            cerrando = (act is not None and act.kind == "dictado"
+                        and (act.data.get("state") or "") == "transcribiendo")
+            k = min(1.0, dt * (6.0 if cerrando else 18.0))
             for i, (visto, objetivo) in enumerate(zip(self.dict_shown,
                                                       self.dict_levels)):
                 nuevo = visto + (objetivo - visto) * k
@@ -1527,7 +1561,6 @@ class Island(Gtk.Window):
 
         # Una animacion ciclica no "se asienta" nunca: mientras este en
         # pantalla hay que seguir pidiendo fotogramas.
-        act = self.current()
         if act is not None and act.kind == "power" and act.data.get("charging"):
             moving = True
         # Mientras se dicta tampoco se asienta nada: la onda la mueve el

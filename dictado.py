@@ -32,6 +32,7 @@ import array
 import shutil
 import signal
 import subprocess
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config as C
@@ -41,6 +42,23 @@ RUN = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island-dictado")
 PIDF = os.path.join(RUN, "pid")
 WAV = os.path.join(RUN, "audio.wav")
 FIFO = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island.fifo")
+
+# Con ISLAND_DEBUG se escribe una linea por fase con el tiempo que
+# costo. Es la unica forma de saber donde se va el retardo entre soltar
+# la tecla y ver el texto: el que graba es un proceso suelto sin
+# terminal a la que quejarse.
+TRAZA = os.path.join(RUN, "traza.log")
+
+
+def traza(que, t0):
+    if not os.environ.get("ISLAND_DEBUG"):
+        return
+    try:
+        with open(TRAZA, "a") as fh:
+            fh.write("%-16s %6.0f ms\n" % (que, (time.monotonic() - t0) * 1000))
+    except OSError:
+        pass
+
 
 RATE = 16000                 # lo que quiere whisper; remuestrear seria peor
 CHUNK = 0.08                 # cada cuanto se manda un nivel a la isla
@@ -114,17 +132,22 @@ def grabar(destino):
          "--format", "s16", WAV],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    parar = {"ahora": False}
-    signal.signal(signal.SIGUSR1, lambda *_: parar.__setitem__("ahora", True))
-    signal.signal(signal.SIGTERM, lambda *_: parar.__setitem__("ahora", True))
+    # Un Event y no una bandera: al soltar la tecla, la espera de abajo
+    # termina en el acto en vez de aguantar hasta el final del trozo en
+    # curso. Son 80 ms, pero son los 80 ms que van justo despues de
+    # dejar de hablar, que es donde mas se notan.
+    parar = threading.Event()
+    signal.signal(signal.SIGUSR1, lambda *_: parar.set())
+    signal.signal(signal.SIGTERM, lambda *_: parar.set())
 
     enviar(state="oyendo", value=0.0, app=destino["app"],
            ia=destino.get("ia", ""))
 
     pos = 44                                   # saltar la cabecera del wav
     t0 = time.monotonic()
-    while not parar["ahora"]:
-        time.sleep(CHUNK)
+    while not parar.is_set():
+        if parar.wait(CHUNK):
+            break
         if rec.poll() is not None:             # pw-record se murio solo
             break
         if time.monotonic() - t0 > C.DICT_MAX_S:
@@ -139,6 +162,7 @@ def grabar(destino):
         enviar(state="oyendo", value=nivel(trozo), app=destino["app"],
                ia=destino.get("ia", ""))
 
+    t_suelta = time.monotonic()
     # SIGINT y no kill: pw-record cierra la cabecera del wav al salir, y
     # sin cabecera el fichero no es un wav que whisper pueda abrir.
     if rec.poll() is None:
@@ -147,6 +171,7 @@ def grabar(destino):
             rec.wait(timeout=3)
         except subprocess.TimeoutExpired:
             rec.kill()
+    traza("cerrar micro", t_suelta)
     return time.monotonic() - t0
 
 
@@ -156,18 +181,42 @@ BASURA = ("[BLANK_AUDIO]", "(música)", "(music)", "[Música]", "[MÚSICA]",
           "(sonido)", "[ Silencio ]", "(silencio)")
 
 
-def transcribir():
+def ventana(dur):
+    """Tokens de contexto de audio para `dur` segundos de grabacion.
+
+    Whisper codifica SIEMPRE una ventana de 30 s: hables dos segundos o
+    veinte, el codificador cuesta lo mismo. Recortarla a lo que de
+    verdad hay es la optimizacion mas grande que admite esto, y medida
+    en esta maquina con el modelo small:
+
+        2,5 s de audio, ventana entera   2488 ms
+        2,5 s de audio, ventana ajustada  918 ms   (mismo texto, coma a coma)
+        11 s de audio,  ventana entera   4934 ms
+        11 s de audio,  ventana ajustada 3075 ms   (mismo texto)
+
+    50 tokens por segundo es la relacion real (30 s -> 1500). El 35% y
+    los 64 de propina no son por gusto: quedarse CORTO recorta el audio
+    y se pierden palabras del final, que es un fallo mucho peor que
+    tardar un poco mas.
+    """
+    return max(256, min(1500, int(dur * 50 * 1.35) + 64))
+
+
+def transcribir(dur=0.0):
     whisper = os.path.expanduser(C.DICT_WHISPER)
     modelo = os.path.expanduser(C.DICT_MODEL)
     if not (os.path.exists(whisper) and os.path.exists(modelo)):
         return "", "Falta whisper o el modelo"
+    t0 = time.monotonic()
     try:
         r = subprocess.run(
             [whisper, "-m", modelo, "-f", WAV, "-l", C.DICT_LANG,
-             "-t", str(C.DICT_THREADS), "-nt", "-np"],
+             "-t", str(C.DICT_THREADS), "-nt", "-np",
+             "-ac", str(ventana(dur))],
             capture_output=True, text=True, timeout=180)
     except Exception as e:
         return "", str(e)[:60]
+    traza("whisper", t0)
     texto = " ".join(r.stdout.split())
     for b in BASURA:
         texto = texto.replace(b, " ")
@@ -201,6 +250,7 @@ def escribir(texto, destino):
     acabas de dictar sigue estando a un Ctrl+V en vez de haberse
     perdido.
     """
+    t0 = time.monotonic()
     try:
         subprocess.run(["xclip", "-selection", "clipboard"],
                        input=texto.encode(), timeout=3)
@@ -219,6 +269,7 @@ def escribir(texto, destino):
                  else "ctrl+v")
         subprocess.run(["xdotool", "key", "--clearmodifiers", atajo],
                        timeout=5, check=True)
+        traza("pegar", t0)
         return "escrito"
     except Exception:
         # Respaldo: teclearlo. El retardo de 12 ms no es decorativo, es
@@ -267,7 +318,7 @@ def start():
             os._exit(0)
         enviar(state="transcribiendo", app=destino["app"],
                ia=destino.get("ia", ""))
-        texto, err = transcribir()
+        texto, err = transcribir(dur)
         if err:
             enviar(state="error", text=err, app=destino["app"])
         elif not texto:
