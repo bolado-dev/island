@@ -130,6 +130,9 @@ class Island(Gtk.Window):
         # DESLIZARSE hasta su sitio en vez de saltar.
         # Posicion de la pildora del indicador de escritorios.
         self.sp_wsx = Spring(0, response=T.SP_WS_RESP, damping=T.SP_WS_DAMP)
+        # Crecimiento de la pildora al aterrizar en un escritorio.
+        self.sp_pop = Spring(T.SEG_SLOT, response=T.SP_POP_RESP,
+                             damping=T.SP_POP_DAMP)
         self.launch = None        # estado del lanzador de aplicaciones
         self.apps = []            # indice de .desktop (se llena en diferido)
         self.wins = []            # ventanas abiertas (se lee al abrir)
@@ -183,6 +186,23 @@ class Island(Gtk.Window):
 
     # ------------------------------------------------------------ datos
 
+    def _al_frente(self):
+        """Vuelve a poner la ventana encima de todo.
+
+        GTK marca _NET_WM_STATE_ABOVE, pero bspwm no gestiona las
+        ventanas de tipo DOCK: no hay nadie que haga cumplir esa marca,
+        asi que cualquier ventana que se mapee o reciba el foco queda
+        por encima y el notch desaparece detras. Es lo mismo que
+        resolvia 'wm-restack = bspwm' en polybar.
+
+        Se llama en los eventos de bspwm porque son exactamente los
+        momentos en que el apilado cambia: abrir, cerrar, enfocar o
+        cambiar de escritorio.
+        """
+        gw = self.get_window()
+        if gw is not None:
+            gw.raise_()
+
     def _on_bspwm(self):
         """Evento de bspwm. Si ha cambiado el escritorio, el notch asoma.
 
@@ -192,6 +212,7 @@ class Island(Gtk.Window):
         cambio de ESCRITORIO de los demas informes de bspwm (que llegan
         tambien al cambiar de ventana) para no asomarlo sin motivo.
         """
+        self._al_frente()
         foco = self.bspwm.focused
         if foco != getattr(self, "_ws_prev", None):
             if self._ws_prev is not None:
@@ -434,12 +455,18 @@ class Island(Gtk.Window):
         estados = [st for _n, st in self.bspwm.desktops]
         destino = self.bspwm.focused * R.WsBar.paso()
         if self.sp_wsx.target != destino:
+            self._ws_salida = self.sp_wsx.target
             if T.WS_ANIM:
                 self.sp_wsx.set(destino)
-                self.ensure_tick()
             else:
                 self.sp_wsx.snap(destino)
-        ws = R.Row([R.WsBar(estados, self.sp_wsx.value)], tag="ws")
+            if T.WS_POP:
+                # Arranca del tamano de un punto y crece hasta el suyo.
+                self.sp_pop.snap(T.SEG_BAR)
+                self.sp_pop.set(T.SEG_SLOT)
+            self.ensure_tick()
+        ws = R.Row([R.WsBar(estados, self.sp_wsx.value, self.sp_pop.value,
+                            getattr(self, "_ws_salida", None))], tag="ws")
         row.add(ws)
 
         row.add(R.Gap(T.GAP_GROUP))
@@ -1252,7 +1279,8 @@ class Island(Gtk.Window):
 
         if self.activities:
             self._mostrar()
-        if T.WS_ANIM and not self.sp_wsx.settled:
+        if ((T.WS_ANIM and not self.sp_wsx.settled)
+                or (T.WS_POP and not self.sp_pop.settled)):
             self.ensure_tick()
         self._schedule_expiry()
         self.sp_w.set(target_w)
@@ -1334,6 +1362,9 @@ class Island(Gtk.Window):
             # El contenido se construye con el valor del muelle, asi que
             # hay que rehacerlo: no basta con repintar.
             self._ws_dirty = True
+        if T.WS_POP and self.sp_pop.step(dt):
+            moving = True
+            self._ws_dirty = True
 
         # Una actividad puede caducar sin que llegue ningun evento, asi
         # que hay que mirar el reloj tambien aqui.
@@ -1368,6 +1399,7 @@ class Island(Gtk.Window):
     # ------------------------------------------------- auto-ocultado
 
     def _mostrar(self):
+        self._al_frente()
         if self._hide_id:
             GLib.source_remove(self._hide_id)
             self._hide_id = None
@@ -1462,9 +1494,19 @@ class Island(Gtk.Window):
         w = max(self.sp_w.value, self.sp_w.target, T.H_COMPACT)
         h = max(self.sp_h.value, self.sp_h.target, T.H_COMPACT)
         x = (self.W - w) / 2.0
+        # Solo la parte VISIBLE del notch, recortada contra el borde de
+        # la pantalla. Antes se tomaba la ventana entera desplazada, asi
+        # que con el notch replegado la zona seguia midiendo 62px de
+        # alto aunque solo asomaran 3: bastaba con pasar el raton por la
+        # barra de pestanas del navegador para que se desplegara.
         y0 = T.TOP + self.sp_y.value
-        rect = (int(x), int(min(0, y0)), int(math.ceil(w)),
-                int(math.ceil(h + max(0, -y0))))
+        arriba = max(0.0, y0)
+        abajo = y0 + h
+        if abajo <= arriba:
+            rect = (int(x), 0, int(math.ceil(w)), 0)
+        else:
+            rect = (int(x), int(arriba), int(math.ceil(w)),
+                    int(math.ceil(abajo - arriba)))
         # Cada llamada es un viaje de ida y vuelta al servidor X. Antes
         # se hacia en cada refresco aunque la geometria fuese identica.
         if rect == getattr(self, "_last_input_rect", None):

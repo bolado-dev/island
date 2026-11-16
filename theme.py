@@ -71,7 +71,12 @@ TOP       = 0
 # ---------------------------------------------------------------------
 AUTOHIDE  = True
 PEEK      = 3         # sliver que asoma al estar replegado
-HOT       = 5         # franja sensible en el borde superior
+# Franja sensible del borde superior. Puede ser muy estrecha sin coste:
+# para desplegarlo a proposito se lleva el raton al borde y el puntero
+# se queda clavado en y=0, asi que con 2px se acierta siempre. Cuanto
+# mas estrecha, menos se dispara al pasar por encima camino de otra
+# cosa.
+HOT       = 2
 HIDE_MS   = 700       # espera antes de replegarse al salir el raton
 # Al cambiar de escritorio el notch asoma solo y se queda este rato.
 # Mas largo que HIDE_MS porque aqui hay algo QUE MIRAR: la pildora
@@ -121,6 +126,25 @@ SEG_H_OFF = 4         # grosor de vacio
 WS_ANIM   = False
 SP_WS_RESP = 0.32     # periodo del muelle, si WS_ANIM esta a True
 SP_WS_DAMP = 0.82
+
+# En cambio, la pildora SI crece al llegar: aparece como un punto del
+# tamano de los demas y se estira hasta su ancho. Es la confirmacion de
+# que el cambio ha ocurrido, pero ocurre DONDE vas, no por el camino, asi
+# que no arrastra la mirada por los escritorios de en medio.
+#
+# Amortiguacion casi critica: crece y para, sin rebotar. Con rebote el
+# gesto se lee como un golpe; sin el, como que el punto se abre. Y el
+# periodo es largo para que el estiramiento tenga fotogramas suficientes
+# y no parezca un cambio de tamano seco.
+#
+# Ademas la pildora entra con un fundido: al cambiar de escritorio
+# aparece de golpe en el hueco nuevo, y llegar en azul pleno era lo mas
+# brusco de todo el gesto, mas que el rebote. No arranca transparente
+# del todo (POP_ALFA_MIN) para que no parezca que parpadea.
+WS_POP      = True
+SP_POP_RESP = 0.42
+SP_POP_DAMP = 0.95
+POP_ALFA_MIN = 0.30
 
 # Altura de ventana: tiene que caber el panel MAS ALTO, que ahora es el
 # lanzador (campo de busqueda + cinco filas de 54px = ~426px), no la

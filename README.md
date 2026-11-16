@@ -62,11 +62,15 @@ notch deja asomar 3 píxeles. Baja al acercar el ratón al borde superior, y
 también solo cuando hay algo que enseñar — un cambio de escritorio, una
 notificación, el cargador enchufado.
 
-**Escritorios.** Una pista de segmentos con la píldora del activo. El salto
-no se anima a propósito: el cambio de escritorio lo acabas de pulsar tú, así
-que no hay nada que anunciar, y ver la píldora cruzando por encima de los
-escritorios de en medio distrae más de lo que informa. El despliegue del notch
-ya es aviso de sobra. Si lo prefieres animado, `WS_ANIM` en `theme.py`.
+**Escritorios.** Una pista de segmentos con la píldora del activo. La píldora
+no viaja entre huecos: nace como un punto en el escritorio nuevo y se estira
+hasta su tamaño mientras el anterior hace el gesto al revés, encogiendo y
+apagándose. Verla cruzar por encima de los escritorios de en medio arrastraba
+la mirada por un camino que no importa, y el cambio lo acabas de pulsar tú.
+
+Un solo muelle gobierna la entrada y la salida, así que no pueden
+desacompasarse. Se ajusta con `WS_POP` y `SP_POP_*` en `theme.py`, y
+`WS_ANIM` devuelve el deslizamiento si lo prefieres.
 
 Clic izquierdo salta a ese escritorio; clic derecho abre los ajustes del
 mosaico (monocle, equilibrar, rotar, separación, no molestar).

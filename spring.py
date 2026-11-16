@@ -33,7 +33,15 @@ class Spring:
         a = -2.0 * self.z * self.w * self.vel - (self.w ** 2) * x
         self.vel += a * dt
         self.value += self.vel * dt
-        return not self.settled
+        if self.settled:
+            # Aterrizar EXACTO al parar. El umbral esta pensado en
+            # pixeles, asi que un muelle que trabaje en otra escala
+            # (una opacidad de 0 a 1) se detendria notablemente corto de
+            # su destino y se quedaria ahi para siempre.
+            self.value = self.target
+            self.vel = 0.0
+            return False
+        return True
 
     @property
     def settled(self):

@@ -675,9 +675,18 @@ class WsBar(object):
     'pill_x' llega ya interpolado por el muelle de la isla; aqui solo
     se dibuja donde diga.
     """
-    def __init__(self, estados, pill_x, slot_h=18, tag_pref="ws:"):
+    def __init__(self, estados, pill_x, pill_w=None, prev_x=None,
+                 slot_h=18, tag_pref="ws:"):
         self.estados = estados          # 'free' | 'occupied' | 'urgent'
         self.pill_x = pill_x
+        # Ancho actual de la pildora, en pixeles. Al cambiar de
+        # escritorio arranca en el de un punto normal y crece hasta el
+        # suyo, de modo que se lee como "el punto de ese escritorio se
+        # estira".
+        self.pill_w = T.SEG_SLOT if pill_w is None else pill_w
+        # Hueco que acaba de dejar, para apagarlo con el mismo gesto
+        # invertido en vez de que desaparezca de golpe.
+        self.prev_x = prev_x
         self.slot_h, self.tag_pref = slot_h, tag_pref
 
     @staticmethod
@@ -710,7 +719,29 @@ class WsBar(object):
         # La pildora va ENCIMA y tapa la marca del escritorio en el que
         # esta, asi que la pista se dibuja sin tratar al activo como un
         # caso aparte.
-        capsule(cr, x + self.pill_x, cy - T.SEG_H / 2.0,
-                T.SEG_SLOT, T.SEG_H, T.SEG_H / 2.0)
-        cr.set_source_rgba(*T.ACCENT, a)
+        #
+        # Crece desde el ancho de un punto hasta el suyo, centrada en el
+        # hueco: asi el estiramiento sale de los dos lados a la vez y no
+        # parece que empuje hacia la derecha.
+        pw = max(T.SEG_H, self.pill_w)
+        # El fundido va atado al crecimiento, no a un muelle aparte: asi
+        # no pueden desacompasarse y hace falta un estado menos.
+        k = (pw - T.SEG_BAR) / float(max(1e-6, T.SEG_SLOT - T.SEG_BAR))
+        k = max(0.0, min(1.0, k))
+
+        # Salida: el hueco anterior hace el gesto al reves, encogiendo y
+        # apagandose con el MISMO avance. Al cambiar de escritorio la
+        # pildora desaparecia de golpe de donde estaba, que era el
+        # momento mas brusco que quedaba.
+        if self.prev_x is not None and k < 0.999:
+            sw = T.SEG_SLOT - (T.SEG_SLOT - T.SEG_BAR) * k
+            sx = x + self.prev_x + (T.SEG_SLOT - sw) / 2.0
+            capsule(cr, sx, cy - T.SEG_H / 2.0, sw, T.SEG_H, T.SEG_H / 2.0)
+            cr.set_source_rgba(*T.ACCENT, a * (1.0 - k))
+            cr.fill()
+
+        px = x + self.pill_x + (T.SEG_SLOT - pw) / 2.0
+        alfa = T.POP_ALFA_MIN + (1.0 - T.POP_ALFA_MIN) * k
+        capsule(cr, px, cy - T.SEG_H / 2.0, pw, T.SEG_H, T.SEG_H / 2.0)
+        cr.set_source_rgba(*T.ACCENT, a * alfa)
         cr.fill()
