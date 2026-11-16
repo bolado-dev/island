@@ -164,8 +164,18 @@ class Bspwm(object):
 
 # --------------------------------------------------------------- foco
 
-def _arbol_tiene(pid, nombre):
-    """True si `pid` o alguno de sus descendientes se llama `nombre`.
+# Las IA que se saben reconocer, por el nombre de su proceso. El valor
+# es (slug del logo en icons/, nombre legible). Añadir otra es una linea
+# aqui y un SVG al lado; si el SVG falta, se enseña el nombre y ya.
+IAS = (
+    ("claude", ("claude", "Claude")),
+    ("codex",  ("codex",  "Codex")),
+    ("gemini", ("gemini", "Gemini")),
+)
+
+
+def _arbol_ia(pid):
+    """Que IA cuelga de `pid`, mirando el arbol de procesos entero.
 
     Un solo `ps` y se recorre el arbol en memoria: lanzar uno por nivel
     seria mas lento justo en el momento sensible, que es el cambio de
@@ -176,7 +186,7 @@ def _arbol_tiene(pid, nombre):
                                 capture_output=True, text=True,
                                 timeout=2).stdout
     except Exception:
-        return False
+        return None
     hijos, nombres = {}, {}
     for linea in salida.split("\n"):
         campos = linea.split(None, 2)
@@ -194,10 +204,12 @@ def _arbol_tiene(pid, nombre):
         if p in visto:
             continue
         visto.add(p)
-        if nombre in nombres.get(p, "").lower():
-            return True
+        comm = nombres.get(p, "").lower()
+        for clave, datos in IAS:
+            if clave in comm:
+                return datos
         pila.extend(hijos.get(p, []))
-    return False
+    return None
 
 
 def ventana_enfocada():
@@ -218,7 +230,7 @@ def ventana_enfocada():
 
     wid = _run(["bspc", "query", "-N", "-n", "focused"])
     if not wid:
-        return {"id": "", "clase": "", "app": "", "claude": False}
+        return {"id": "", "clase": "", "app": "", "ia": ""}
     clase, pid = "", 0
     for linea in _run(["xprop", "-id", wid, "WM_CLASS", "_NET_WM_PID"]).split("\n"):
         if linea.startswith("WM_CLASS"):
@@ -230,18 +242,19 @@ def ventana_enfocada():
                 pid = int(linea.split("=")[-1])
             except ValueError:
                 pid = 0
-    claude = bool(pid) and _arbol_tiene(pid, "claude")
-    app = "Claude" if claude else {
+    ia = _arbol_ia(pid) if pid else None
+    app = ia[1] if ia else {
         "kitty": "Terminal", "google-chrome": "Chrome",
         "chromium": "Chromium"}.get(clase, clase)
-    return {"id": wid, "clase": clase, "app": app, "claude": claude}
+    return {"id": wid, "clase": clase, "app": app,
+            "ia": ia[0] if ia else ""}
 
 
 class Foco(object):
     """Ventana enfocada, en vivo via 'bspc subscribe node_focus'.
 
     Existe para una sola cosa: que el notch pueda decir que el dictado
-    esta disponible cuando miras una ventana de Claude. Por eso NO
+    esta disponible cuando miras una ventana de una IA. Por eso NO
     sondea: recorrer el arbol de procesos cada pocos segundos para un
     indicador que casi nunca cambia seria gastar bateria en nada. Se
     mira cuando el foco cambia, que es la unica vez que puede cambiar
@@ -249,7 +262,7 @@ class Foco(object):
     """
     def __init__(self, on_change):
         self.on_change = on_change
-        self.info = {"id": "", "clase": "", "app": "", "claude": False}
+        self.info = {"id": "", "clase": "", "app": "", "ia": ""}
         self.proc = None
         self.refrescar()
         self.start()
@@ -269,11 +282,11 @@ class Foco(object):
             return False
         if not src.readline():
             return False
-        antes = self.info.get("claude")
+        antes = self.info.get("ia")
         self.refrescar()
         # Solo molesta a la isla si CAMBIA la respuesta: alt-tab entre
-        # dos ventanas que no son Claude no tiene por que repintar nada.
-        if self.info.get("claude") != antes:
+        # dos ventanas que no son de una IA no repinta nada.
+        if self.info.get("ia") != antes:
             self.on_change()
         return True
 
@@ -281,8 +294,13 @@ class Foco(object):
         self.info = ventana_enfocada()
 
     @property
-    def claude(self):
-        return bool(self.info.get("claude"))
+    def ia(self):
+        """Slug de la IA enfocada ("claude", "gemini"...) o cadena vacia."""
+        return self.info.get("ia") or ""
+
+    @property
+    def app(self):
+        return self.info.get("app") or ""
 
 
 # --------------------------------------------------------------- fifo

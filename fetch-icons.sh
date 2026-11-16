@@ -60,3 +60,33 @@ print("  %d iconos en %s%s" % (hechos, dest,
       ("  (%d sin encontrar)" % faltan) if faltan else ""))
 PY
 echo "Listo. Pon USAR_SOLAR = True en theme.py para usarlos."
+
+# --- logos de las IA, para el indicador de dictado -------------------
+#
+# Estos SI hacen falta siempre, no solo con USAR_SOLAR: el notch los usa
+# para decir a que IA va a ir lo que dictes. Tampoco se versionan, y
+# aqui el motivo pesa mas que con Solar: son marcas registradas de sus
+# dueños. Si falta el fichero no se rompe nada, el notch enseña el
+# nombre en texto.
+#
+# simple-icons: https://simpleicons.org (los trazos, CC0)
+echo "Bajando los logos de las IA..."
+python3 - "$DIR" <<'PY2'
+import os, re, sys, urllib.request
+dest = os.path.join(sys.argv[1], "icons")
+os.makedirs(dest, exist_ok=True)
+BASE = "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/%s.svg"
+# alias de sources.IAS -> nombre del icono en simple-icons
+QUIERO = {"ia-claude": "claude", "ia-gemini": "googlegemini"}
+for alias, nombre in QUIERO.items():
+    try:
+        svg = urllib.request.urlopen(BASE % nombre, timeout=60).read().decode()
+    except Exception as e:
+        print("  %s: no se pudo bajar (%s)" % (alias, e))
+        continue
+    # El <title> sobra y el relleno tambien: se pinta como mascara, asi
+    # que el color lo pone el tema y no el fichero.
+    svg = re.sub(r"<title>.*?</title>", "", svg, flags=re.S)
+    open(os.path.join(dest, alias + ".svg"), "w").write(svg)
+    print("  %s.svg" % alias)
+PY2

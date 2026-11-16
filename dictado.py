@@ -35,6 +35,7 @@ import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config as C
+import sources
 
 RUN = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island-dictado")
 PIDF = os.path.join(RUN, "pid")
@@ -67,70 +68,11 @@ def enviar(**campos):
 
 # ------------------------------------------------------------- ventana
 
-def _salida(cmd):
-    try:
-        return subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=2).stdout.strip()
-    except Exception:
-        return ""
-
-
 def foco():
-    """Quien tiene el foco AHORA: id de ventana, nombre legible y si es
-    una ventana de Claude.
-
-    Para Claude Code no vale mirar el titulo: la terminal lo cambia a lo
-    que este haciendo la conversacion ("Almacenamiento de fotogramas
-    para..."), asi que un titulo no dice de que programa es. Lo que si
-    lo dice es el arbol de procesos de esa ventana: si cuelga de ella un
-    proceso que se llama claude, es Claude Code.
-    """
-    wid = _salida(["bspc", "query", "-N", "-n", "focused"])
-    if not wid:
-        return {"id": "", "app": "", "claude": False}
-    props = _salida(["xprop", "-id", wid, "WM_CLASS", "_NET_WM_PID"])
-    clase, pid = "", 0
-    for linea in props.split("\n"):
-        if linea.startswith("WM_CLASS"):
-            partes = [p.strip().strip('"') for p in linea.split("=", 1)[-1].split(",")]
-            clase = (partes[-1] or partes[0]).strip()
-        elif linea.startswith("_NET_WM_PID"):
-            try:
-                pid = int(linea.split("=")[-1])
-            except ValueError:
-                pid = 0
-
-    claude = False
-    if pid:
-        # Un solo `ps` y se recorre el arbol: lanzar uno por nivel seria
-        # mas lento y esto corre justo cuando pulsas la tecla.
-        hijos = {}
-        nombres = {}
-        for linea in _salida(["ps", "-eo", "pid=,ppid=,comm="]).split("\n"):
-            campos = linea.split(None, 2)
-            if len(campos) == 3:
-                try:
-                    hijos.setdefault(int(campos[1]), []).append(int(campos[0]))
-                    nombres[int(campos[0])] = campos[2]
-                except ValueError:
-                    pass
-        pila, visto = [pid], set()
-        while pila:
-            p = pila.pop()
-            if p in visto:
-                continue
-            visto.add(p)
-            if "claude" in nombres.get(p, "").lower():
-                claude = True
-                break
-            pila.extend(hijos.get(p, []))
-
-    if claude:
-        app = "Claude"
-    else:
-        app = {"kitty": "Terminal", "google-chrome": "Chrome",
-               "chromium": "Chromium"}.get(clase.lower(), clase or "")
-    return {"id": wid, "app": app, "claude": claude, "clase": clase.lower()}
+    """La ventana enfocada. La deteccion vive en sources, que es de
+    donde la lee tambien la isla: dos copias de "esto es Claude" se
+    separan en cuanto una de las dos aprenda a reconocer otra IA."""
+    return sources.ventana_enfocada()
 
 
 # -------------------------------------------------------------- nivel
@@ -177,7 +119,7 @@ def grabar(destino):
     signal.signal(signal.SIGTERM, lambda *_: parar.__setitem__("ahora", True))
 
     enviar(state="oyendo", value=0.0, app=destino["app"],
-           claude=destino["claude"])
+           ia=destino.get("ia", ""))
 
     pos = 44                                   # saltar la cabecera del wav
     t0 = time.monotonic()
@@ -195,7 +137,7 @@ def grabar(destino):
         except OSError:
             trozo = b""
         enviar(state="oyendo", value=nivel(trozo), app=destino["app"],
-               claude=destino["claude"])
+               ia=destino.get("ia", ""))
 
     # SIGINT y no kill: pw-record cierra la cabecera del wav al salir, y
     # sin cabecera el fichero no es un wav que whisper pueda abrir.
@@ -321,10 +263,10 @@ def start():
         dur = grabar(destino)
         if dur < 0.4:
             enviar(state="error", text="Demasiado corto", app=destino["app"],
-                   claude=destino["claude"])
+                   ia=destino.get("ia", ""))
             os._exit(0)
         enviar(state="transcribiendo", app=destino["app"],
-               claude=destino["claude"])
+               ia=destino.get("ia", ""))
         texto, err = transcribir()
         if err:
             enviar(state="error", text=err, app=destino["app"])
@@ -333,7 +275,7 @@ def start():
         else:
             como = escribir(texto, destino)
             enviar(state="listo", text=texto, app=destino["app"],
-                   claude=destino["claude"],
+                   ia=destino.get("ia", ""),
                    title="escrito" if como == "escrito" else "copiado")
     finally:
         for f in (PIDF, WAV):

@@ -146,19 +146,27 @@ acabaría escrito en cualquier parte. Al soltar, el texto va a la ventana que
 tenías delante cuando empezaste.
 
 **El notch avisa de que el dictado está disponible.** Cuando el foco entra en
-una ventana de Claude aparece en reposo un micrófono azul con la palabra
-«Dictado», y se va cuando el foco sale. Mismo criterio que el «no molestar»:
+una ventana de una IA aparece en reposo **su logo en blanco** junto a la
+palabra «Dictado», y se va cuando el foco sale. Mismo criterio que el «no
+molestar»:
 aparece solo cuando significa algo, porque un icono permanente para un estado
 que casi siempre está apagado es ruido fijo. El foco se consulta cuando
 cambia (`bspc subscribe node_focus`), no en bucle: recorrer el árbol de
 procesos cada pocos segundos para un indicador que casi nunca cambia sería
 gastar batería en nada.
 
-**Reconoce las ventanas de Claude y lo dice en azul.** No por el título: una
-terminal con Claude Code dentro se titula con lo que esté haciendo la
-conversación, así que el título no identifica al programa. Lo que sí lo
-identifica es el árbol de procesos de esa ventana. El texto se escribe igual
-en cualquier sitio; el azul es para saber a dónde va antes de soltar la tecla.
+**Reconoce qué IA tienes delante y enseña su logo**, no su nombre: un logo se
+reconoce de un vistazo y no hay que leerlo, que es lo que se necesita de algo
+que está en pantalla dos segundos. Y no lo deduce del título: una terminal con
+Claude Code dentro se titula con lo que esté haciendo la conversación, así que
+el título dice de qué va la ventana pero no de qué programa es. Lo que sí lo
+dice es el árbol de procesos.
+
+Reconoce `claude`, `codex` y `gemini` (`sources.IAS`). Añadir otra es una
+línea ahí y un SVG en `icons/`; si falta el SVG se enseña el nombre y ya. Los
+logos salen de [simple-icons](https://simpleicons.org) y se pintan como
+máscara, así que el fichero no guarda el color: el blanco lo pone el tema. El
+texto se escribe igual en cualquier ventana, con IA o sin ella.
 
 **El texto se pega, no se teclea.** Medido aquí: `xdotool type` se come las
 vocales acentuadas ("grabe video" por "grabé vídeo"), porque remapea un código
@@ -236,6 +244,11 @@ cd ~/.local/share/whisper.cpp
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 ./models/download-ggml-model.sh small-q5_1
 ```
+
+Y `./fetch-icons.sh`, que además de los iconos de Solar baja los logos de las
+IA a `icons/`. No se versionan, como el resto del arte ajeno, y aquí pesa más
+el motivo: son marcas registradas. Sin ellos no se rompe nada, el notch enseña
+el nombre en texto.
 
 Y el atajo, en tu `sxhkdrc`. El soltado es un atajo distinto (`@`), que es lo
 que lo convierte en push-to-talk de verdad:

@@ -527,15 +527,20 @@ class Island(Gtk.Window):
         # Dictado disponible. Mismo criterio que el "no molestar" de
         # abajo: aparece solo cuando significa algo. Un icono permanente
         # para un estado que casi siempre esta apagado es ruido fijo.
-        quiere = 1.0 if self.foco.claude else 0.0
+        quiere = 1.0 if self.foco.ia else 0.0
         if self.sp_mic.target != quiere:
             self.sp_mic.set(quiere)
             self.ensure_tick()
-        if self.sp_mic.value > 0.01 or self.foco.claude:
+        if self.sp_mic.value > 0.01 or self.foco.ia:
+            # El logo de la IA, en blanco como el resto de iconos de
+            # estado, y "Dictado" al lado para que la primera vez se
+            # entienda que el logo no es decoracion sino que indica
+            # donde va a caer lo que digas.
+            logo = self.foco.ia or "claude"
             row.add(R.Row([R.Alfa(R.Row([
-                self._ico("mic", 24, T.ACCENT, T.G_MIC),
-                R.Gap(7),
-                R.Text("Dictado", T.F_SMALL, T.ACCENT),
+                R.Icon("ia-" + logo, 22, T.FG, T.G_MIC, T.F_SMALL),
+                R.Gap(8),
+                R.Text("Dictado", T.F_SMALL, T.DIM),
             ]), self.sp_mic)], tag="dictado"))
             row.add(R.Gap(T.GAP_GROUP))
             self._mic_en_fila = True
@@ -622,7 +627,7 @@ class Island(Gtk.Window):
         if k == "dictado":
             estado = d.get("state") or "oyendo"
             destino = d.get("app") or ""
-            es_claude = bool(d.get("claude"))
+            ia = d.get("ia") or ""
 
             if estado == "oyendo":
                 fila = R.Row().add(
@@ -654,15 +659,21 @@ class Island(Gtk.Window):
                     R.Gap(14),
                     R.Text(d.get("text") or "Sin audio", T.F_TITLE, T.DIM))
 
-            # A donde va el texto. En una ventana de Claude se pinta en
-            # azul: es la diferencia entre "esto se va a escribir solo"
-            # y "esto se queda en el portapapeles".
+            # A donde va el texto. Si es una IA conocida, su logo en
+            # blanco: un logo se reconoce de un vistazo y no hay que
+            # leerlo, que es justo lo que se necesita de algo que esta
+            # en pantalla dos segundos. Si no la conocemos, su nombre.
             if destino and estado != "transcribiendo":
                 fila.add(R.Gap(T.GAP_ITEM),
                          R.Text("\u00b7", T.F_SUB, T.DIM2),
-                         R.Gap(T.GAP_ITEM),
-                         R.Text(destino, T.F_SUB,
-                                T.ACCENT if es_claude else T.DIM))
+                         R.Gap(T.GAP_ITEM))
+                if ia:
+                    # El respaldo del icono es el propio nombre: si
+                    # algun dia falta el SVG, se lee en vez de dejar un
+                    # hueco.
+                    fila.add(R.Icon("ia-" + ia, 26, T.FG, destino, T.F_SUB))
+                else:
+                    fila.add(R.Text(destino, T.F_SUB, T.DIM))
             return fila
 
         if k == "music":
