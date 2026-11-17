@@ -142,9 +142,14 @@ es el girador que las CLI de IA ponen delante del título del terminal: cuando
 desaparece, han terminado. Vale para cualquiera que haga eso, sin
 configurarla.
 
-No avisa si tienes esa ventana delante, porque entonces lo estás viendo; ni de
-los trabajos de menos de diez segundos, porque avisar de todos convierte el
-notch en ruido (`TRABAJO_MINIMO` en `config.py`).
+Avisa de **todos**, dure lo que dure. La duración solo se enseña si se vio
+empezar: a una ventana que ya estaba trabajando cuando arrancó la isla no se le
+inventa un tiempo, porque un número se lee como un dato. Lo único que lo calla es tener esa
+ventana delante, porque entonces lo estás viendo. Hubo un mínimo de diez
+segundos y se quitó: como el foco ya filtra lo que estás mirando, el reloj
+solo servía para tragarse los avisos de lo que acaba rápido mientras estás en
+otra cosa, que es justo cuando hacen falta. Si alguna CLI resulta apagar el
+girador a mitad de trabajo, `TRABAJO_MINIMO` en `config.py` lo devuelve.
 
 Lo que cuesta: un `ps` cada cinco segundos. La lista de ventanas, sus procesos
 y sus títulos salen del servidor X por `ctypes`, sin lanzar `xprop` ni `xdotool`

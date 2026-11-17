@@ -511,7 +511,7 @@ class Trabajo(object):
     ella ningun proceso que se llame claude. Esa version no registraba
     la ventana jamas. Comprobado con una ventana de mentira.
     """
-    def __init__(self, on_fin, minimo=10.0, cada=5):
+    def __init__(self, on_fin, minimo=0.0, cada=2):
         self.on_fin = on_fin
         self.minimo = minimo
         self.cada = cada
@@ -529,8 +529,13 @@ class Trabajo(object):
             pids = _cardinales(win, b"_NET_WM_PID")
             ia = _ia_en(pids[0], arbol) if pids else None
             if ia:
+                # "ocupado" arranca sin saberse (None) y no en False: si
+                # la ventana ya estaba trabajando cuando la descubrimos,
+                # dar por hecho que no lo estaba hace que el siguiente
+                # vistazo parezca el comienzo del trabajo y la duracion
+                # salga mal. Y si no sabemos cuando empezo, no se dice.
                 self.vistas[win] = {"ia": ia[0], "app": ia[1],
-                                    "ocupado": False, "desde": 0.0}
+                                    "ocupado": None, "desde": None}
 
     def _tick(self):
         if self._cuenta % self.cada == 0:
@@ -548,11 +553,15 @@ class Trabajo(object):
                 del self.vistas[win]        # la ventana ya no esta
                 continue
             ocupado = tit[0] in GIRADORES
-            if ocupado and not est["ocupado"]:
+            if est["ocupado"] is None:
+                # Primera vez que la vemos: si ya estaba trabajando, su
+                # comienzo se lo perdimos y la duracion queda en None.
+                est["desde"] = None if ocupado else 0.0
+            elif ocupado and not est["ocupado"]:
                 est["desde"] = ahora
             elif est["ocupado"] and not ocupado:
-                tardo = ahora - est["desde"]
-                if tardo >= self.minimo and win != enfocada:
+                tardo = (ahora - est["desde"]) if est["desde"] else None
+                if (tardo is None or tardo >= self.minimo) and win != enfocada:
                     self.on_fin(est["ia"], est["app"], tardo)
             est["ocupado"] = ocupado
         return True

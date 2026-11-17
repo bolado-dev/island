@@ -97,10 +97,16 @@ DICT_PROMPT = ("Transcripcion en espanol de Espana, con puntuacion y "
                "mayusculas correctas.")
 
 # Segundos que tiene que durar un trabajo de la IA para que el notch
-# avise al terminar. Por debajo no merece aviso: una respuesta de tres
-# segundos la ves tu solo, y avisar de todas convierte el notch en
-# ruido.
-TRABAJO_MINIMO = 10.0
+# avise al terminar. 0 = avisar siempre, que es como esta.
+#
+# Nacio en 10 con el argumento de que una respuesta de tres segundos la
+# ves tu solo y avisar de todas convierte el notch en ruido. El
+# argumento era malo: si estas mirando la ventana, el aviso no sale
+# igualmente (lo filtra el foco, no el reloj), asi que lo unico que
+# hacia el minimo era tragarse justo los avisos de lo que acaba rapido
+# mientras tu estas en otra cosa. Subirlo otra vez solo tiene sentido
+# si alguna CLI resulta apagar el girador a mitad de trabajo.
+TRABAJO_MINIMO = 0.0
 
 # Historial del portapapeles, para el lanzador. CLIP_CADA es cada
 # cuantos segundos se mira (0 lo apaga); CLIP_MAX, cuantas cosas se

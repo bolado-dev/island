@@ -696,19 +696,24 @@ class Island(Gtk.Window):
                 R.Text("Bateria %d%%" % d.get("pct", 0), T.F_TITLE, T.RED))
 
         if k == "fin-ia":
-            segs = int(d.get("segundos") or 0)
-            cuanto = ("%d:%02d" % (segs // 60, segs % 60) if segs >= 60
-                      else "%d s" % segs)
             fila = R.Row()
             ia = d.get("ia") or ""
             if ia:
                 fila.add(R.Icon("ia-" + ia, 30, T.FG,
                                 d.get("app") or "", T.F_TITLE), R.Gap(16))
-            return fila.add(
-                R.Text("Ha terminado", T.F_TITLE, T.FG),
-                R.Gap(T.GAP_ITEM),
-                R.Text("\u00b7", T.F_SUB, T.DIM2), R.Gap(T.GAP_ITEM),
-                R.Text(cuanto, T.F_SUB, T.DIM))
+            fila.add(R.Text("Ha terminado", T.F_TITLE, T.FG))
+            # La duracion solo si se vio empezar. Inventarse un "0 s"
+            # porque la ventana se descubrio a mitad es peor que no
+            # decir nada: el numero se lee como un dato.
+            segs = d.get("segundos")
+            if segs is not None:
+                segs = int(segs)
+                cuanto = ("%d:%02d" % (segs // 60, segs % 60) if segs >= 60
+                          else "%d s" % segs)
+                fila.add(R.Gap(T.GAP_ITEM),
+                         R.Text("\u00b7", T.F_SUB, T.DIM2), R.Gap(T.GAP_ITEM),
+                         R.Text(cuanto, T.F_SUB, T.DIM))
+            return fila
 
         if k == "micro":
             return R.Row().add(
