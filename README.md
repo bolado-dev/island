@@ -110,8 +110,9 @@ menú de sesión.
   <img src="docs/launcher.png" alt="Lanzador: campo de búsqueda, resultado destacado en grande con su icono y tipo, y debajo la lista con el tipo de cada resultado alineado a la derecha" width="620">
 </p>
 
-**Lanzador.** Aplicaciones, ventanas abiertas, una calculadora y ejecución de
-comandos, en una sola lista ordenada por relevancia y por uso. Las ventanas
+**Lanzador.** Aplicaciones, ventanas abiertas, una calculadora, ejecución de
+comandos y lo último que has copiado, en una sola lista ordenada por
+relevancia y por uso. Las ventanas
 van primero a propósito: en un gestor de mosaico lo que sueles querer es
 saltar a algo que ya tienes abierto, no abrir otra instancia.
 
@@ -119,11 +120,42 @@ La calculadora no usa `eval()`: recorre el árbol de sintaxis y rechaza
 cualquier nodo que no sea aritmética. Un lanzador evaluando lo que tecleas
 sería ejecutar código arbitrario.
 
+El historial del portapapeles solo aparece **cuando escribes algo**: sin
+búsqueda, lo que quieres es saltar a una ventana o abrir un programa, que es a
+lo que se abre el lanzador el 95% de las veces. Y no toca el disco a
+propósito: por el portapapeles pasan contraseñas, y lo que no se guarda no se
+filtra. Es además la única pieza de la isla que sondea, porque X no avisa de
+un cambio de selección a quien no se registra con XFixes y eso significaba
+meter un segundo bucle de eventos de X dentro de una aplicación GTK. Medido,
+la alternativa tonta sale a 0,1% de un núcleo: un `xclip -o` son 3 ms, uno
+cada tres segundos.
+
 **Reproducción.** Lo que suene por MPRIS aparece con carátula y controles.
 
 <p align="center">
   <img src="docs/music.png" alt="Tarjeta de reproducción con carátula, título, artista y controles de anterior, pausa y siguiente" width="520">
 </p>
+
+**Avisa cuando la IA termina.** Te vas a otra ventana mientras Claude trabaja
+y el notch baja a decirte que ha acabado, con su logo y lo que tardó. La señal
+es el girador que las CLI de IA ponen delante del título del terminal: cuando
+desaparece, han terminado. Vale para cualquiera que haga eso, sin
+configurarla.
+
+No avisa si tienes esa ventana delante, porque entonces lo estás viendo; ni de
+los trabajos de menos de diez segundos, porque avisar de todos convierte el
+notch en ruido (`TRABAJO_MINIMO` en `config.py`).
+
+Lo que cuesta: un `ps` cada cinco segundos. La lista de ventanas, sus procesos
+y sus títulos salen del servidor X por `ctypes`, sin lanzar `xprop` ni `xdotool`
+para nada.
+
+**Avisa de que hay un micrófono abierto.** Cualquier programa que capture
+audio, no solo el dictado: el notch baja un momento con quién es y deja un
+punto rojo mientras dure. Ahora que la isla sabe escuchar, lo honesto es que
+sea también la que dice cuándo alguien escucha. Por eventos de PipeWire
+(`pw-mon`), sin sondear, y el dictado se identifica con nombre propio para no
+avisarse a sí mismo.
 
 **Dictado por voz.** Mantén `super + v`, habla y suéltala: la isla se
 despliega con la onda del micrófono, transcribe en local y escribe el texto
@@ -210,6 +242,12 @@ casi cuatro segundos en aparecer. Pegar no tiene ninguno de los dos problemas:
 0,1 s y el portapapeles no pasa por el mapa de teclado. El atajo depende de
 dónde se pega, y esa es toda la lista que hay que mantener: Ctrl+Shift+V en
 las terminales, Ctrl+V en lo demás.
+
+A whisper se le pasa además una **pista de estilo** (`DICT_PROMPT`), que el
+modelo toma como «lo que se venía diciendo» y le hace puntuar y usar
+mayúsculas, que en dictado corto es donde más falla. Es deliberadamente
+genérica: meter ahí jerga propia mejora esas palabras y empeora el resto,
+porque el modelo intenta encajarlas donde no tocan.
 
 Transcribe [whisper.cpp](https://github.com/ggml-org/whisper.cpp) en la
 máquina, sin red. El modelo se elige midiendo, no por fama: en un portátil sin

@@ -82,3 +82,29 @@ DICT_MAX_S   = 120
 # si se suelta la tecla ANTES que super, y al levantar la mano suele ser
 # al reves. Vacia = no vigilar, solo el atajo.
 DICT_TECLA = "v"
+
+# Pista que se le da a whisper antes de transcribir. No es una orden,
+# es contexto: el modelo lo toma como "lo que se venia diciendo", asi
+# que arrastra su estilo. Sirve sobre todo para que puntue y use
+# mayusculas, que en dictado corto es donde mas falla.
+#
+# Deliberadamente GENERICO. Meter aqui jerga propia mejora esas
+# palabras y empeora el resto: el modelo intenta encajarlas donde no
+# tocan, y lo normal es dictar frases corrientes. Si algun dia hace
+# falta un vocabulario propio, va en una linea aparte y se añade solo
+# cuando se note el fallo.
+DICT_PROMPT = ("Transcripcion en espanol de Espana, con puntuacion y "
+               "mayusculas correctas.")
+
+# Segundos que tiene que durar un trabajo de la IA para que el notch
+# avise al terminar. Por debajo no merece aviso: una respuesta de tres
+# segundos la ves tu solo, y avisar de todas convierte el notch en
+# ruido.
+TRABAJO_MINIMO = 10.0
+
+# Historial del portapapeles, para el lanzador. CLIP_CADA es cada
+# cuantos segundos se mira (0 lo apaga); CLIP_MAX, cuantas cosas se
+# recuerdan. Nada de esto toca el disco: por el portapapeles pasan
+# contraseñas, y lo que no se guarda no se filtra.
+CLIP_MAX  = 20
+CLIP_CADA = 3

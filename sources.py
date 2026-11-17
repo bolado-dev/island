@@ -6,6 +6,7 @@ GLib, y lo que hay que sondear (bateria, red) se lee de sysfs cada pocos
 segundos. Si el dibujado se bloquease, la animacion daria tirones, que
 es justo lo que se intenta evitar.
 """
+import ctypes
 import os
 import json
 import time
@@ -162,6 +163,133 @@ class Bspwm(object):
             self.focused = focused
 
 
+# ----------------------------------------------------------------- x
+
+_X = {"dpy": None, "lib": None}
+
+
+def _x11():
+    """Conexion minima con el servidor X, por ctypes.
+
+    Sin python-xlib y sin lanzar `xprop` o `xinput` cada segundo: es la
+    misma idea que leer la IP por ioctl en vez de llamar a `ip`. Si no
+    hay sesion grafica, todo lo de aqui devuelve vacio y nadie se
+    entera.
+    """
+    if _X["dpy"] is None:
+        try:
+            lib = ctypes.CDLL("libX11.so.6")
+            lib.XOpenDisplay.restype = ctypes.c_void_p
+            lib.XInternAtom.restype = ctypes.c_ulong
+            lib.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                        ctypes.c_int]
+            lib.XGetWindowProperty.argtypes = [
+                ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+                ctypes.c_long, ctypes.c_long, ctypes.c_int, ctypes.c_ulong,
+                ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte))]
+            dpy = lib.XOpenDisplay(None)
+            _X["lib"], _X["dpy"] = lib, (dpy or False)
+        except OSError:
+            _X["dpy"] = False
+    return _X["lib"], _X["dpy"]
+
+
+def tecla_pulsada(nombre):
+    """True si esa tecla esta fisicamente pulsada ahora mismo (ver
+    dictado.py, que la usa para saber cuando sueltas el push-to-talk)."""
+    lib, dpy = _x11()
+    if not dpy:
+        return False
+    sym = lib.XStringToKeysym(nombre.encode())
+    if not sym:
+        return False
+    kc = lib.XKeysymToKeycode(ctypes.c_void_p(dpy), sym)
+    if not kc:
+        return False
+    mapa = (ctypes.c_char * 32)()
+    lib.XQueryKeymap(ctypes.c_void_p(dpy), mapa)
+    return bool(mapa[kc >> 3][0] & (1 << (kc & 7)))
+
+
+def _cardinales(win, nombre):
+    """Lee una propiedad numerica de una ventana (o de la raiz).
+
+    Vale para `_NET_CLIENT_LIST` (todas las ventanas) y para
+    `_NET_WM_PID` (de quien es una). Las dos son lo mismo por dentro:
+    una lista de enteros de 32 bits.
+    """
+    lib, dpy = _x11()
+    if not dpy:
+        return []
+    prop = lib.XInternAtom(ctypes.c_void_p(dpy), nombre, 0)
+    tipo = ctypes.c_ulong()
+    fmt = ctypes.c_int()
+    n = ctypes.c_ulong()
+    resto = ctypes.c_ulong()
+    datos = ctypes.POINTER(ctypes.c_ubyte)()
+    r = lib.XGetWindowProperty(
+        ctypes.c_void_p(dpy), win, prop, 0, 1024, 0, 0,
+        ctypes.byref(tipo), ctypes.byref(fmt), ctypes.byref(n),
+        ctypes.byref(resto), ctypes.byref(datos))
+    if r != 0 or not datos:
+        return []
+    # format 32 son `long` en C, o sea 8 bytes en 64 bits: es la rareza
+    # clasica de Xlib y la causa de la mitad de los lectores rotos.
+    paso = 8 if fmt.value == 32 else max(1, fmt.value // 8)
+    crudo = bytes(bytearray(datos[i] for i in range(n.value * paso)))
+    lib.XFree(datos)
+    return [int.from_bytes(crudo[i:i + paso], "little")
+            for i in range(0, len(crudo), paso)]
+
+
+def _raiz():
+    lib, dpy = _x11()
+    return lib.XDefaultRootWindow(ctypes.c_void_p(dpy)) if dpy else 0
+
+
+def ventanas():
+    """Todas las ventanas del escritorio, segun el propio servidor X."""
+    lib, dpy = _x11()
+    if not dpy:
+        return []
+    return _cardinales(_raiz(), b"_NET_CLIENT_LIST")
+
+
+def titulo(wid):
+    """Titulo de una ventana, leido directo del servidor X.
+
+    Se prueba `_NET_WM_NAME` (UTF-8, lo que usa todo el mundo desde
+    hace veinte años) y se cae a `WM_NAME` por si acaso. Devuelve "" si
+    la ventana ya no existe, que es como se sabe que se cerro.
+    """
+    lib, dpy = _x11()
+    if not dpy:
+        return ""
+    try:
+        win = int(wid, 16) if isinstance(wid, str) else int(wid)
+    except (TypeError, ValueError):
+        return ""
+    for nombre in (b"_NET_WM_NAME", b"WM_NAME"):
+        prop = lib.XInternAtom(ctypes.c_void_p(dpy), nombre, 0)
+        tipo = ctypes.c_ulong()
+        fmt = ctypes.c_int()
+        n = ctypes.c_ulong()
+        resto = ctypes.c_ulong()
+        datos = ctypes.POINTER(ctypes.c_ubyte)()
+        r = lib.XGetWindowProperty(
+            ctypes.c_void_p(dpy), win, prop, 0, 1024, 0, 0,
+            ctypes.byref(tipo), ctypes.byref(fmt), ctypes.byref(n),
+            ctypes.byref(resto), ctypes.byref(datos))
+        if r == 0 and datos:
+            crudo = bytes(bytearray(datos[i] for i in range(n.value)))
+            lib.XFree(datos)
+            if crudo:
+                return crudo.decode("utf-8", "replace")
+    return ""
+
+
 # --------------------------------------------------------------- foco
 
 # Las IA que se saben reconocer, por el nombre de su proceso. El valor
@@ -174,19 +302,18 @@ IAS = (
 )
 
 
-def _arbol_ia(pid):
-    """Que IA cuelga de `pid`, mirando el arbol de procesos entero.
+def _ps_arbol():
+    """Una foto de los procesos: (hijos por padre, nombre por pid).
 
-    Un solo `ps` y se recorre el arbol en memoria: lanzar uno por nivel
-    seria mas lento justo en el momento sensible, que es el cambio de
-    foco.
+    Se saca una vez y se consulta muchas: lanzar un `ps` por ventana
+    para saber de quien es cada una seria cuatro procesos cada barrido.
     """
     try:
         salida = subprocess.run(["ps", "-eo", "pid=,ppid=,comm="],
                                 capture_output=True, text=True,
                                 timeout=2).stdout
     except Exception:
-        return None
+        return {}, {}
     hijos, nombres = {}, {}
     for linea in salida.split("\n"):
         campos = linea.split(None, 2)
@@ -198,6 +325,12 @@ def _arbol_ia(pid):
             continue
         hijos.setdefault(padre, []).append(hijo)
         nombres[hijo] = campos[2]
+    return hijos, nombres
+
+
+def _ia_en(pid, arbol=None):
+    """Que IA cuelga de `pid`, el mismo o cualquier descendiente."""
+    hijos, nombres = arbol if arbol is not None else _ps_arbol()
     pila, visto = [pid], set()
     while pila:
         p = pila.pop()
@@ -242,7 +375,7 @@ def ventana_enfocada():
                 pid = int(linea.split("=")[-1])
             except ValueError:
                 pid = 0
-    ia = _arbol_ia(pid) if pid else None
+    ia = _ia_en(pid) if pid else None
     app = ia[1] if ia else {
         "kitty": "Terminal", "google-chrome": "Chrome",
         "chromium": "Chromium"}.get(clase, clase)
@@ -301,6 +434,226 @@ class Foco(object):
     @property
     def app(self):
         return self.info.get("app") or ""
+
+
+# ------------------------------------------------------ portapapeles
+
+class Portapapeles(object):
+    """Lo ultimo que has copiado, para poder recuperarlo desde el
+    lanzador.
+
+    Esto SONDEA, y es la unica cosa de la isla que lo hace. X no avisa
+    de un cambio de seleccion a quien no se registra con XFixes, y
+    montar eso aqui significaba meter un segundo bucle de eventos de X
+    dentro de una aplicacion GTK. Se midio lo que cuesta la alternativa
+    tonta: `xclip -o` son unos 3 ms, asi que a uno cada tres segundos
+    sale al 0,1% de un nucleo. Cuando moleste, ahi esta el camino bueno.
+
+    No guarda nada en disco a proposito: por ahi pasan contraseñas.
+    Lo que se copio se olvida al reiniciar la isla.
+    """
+    def __init__(self, maximo=20, cada=3, limite=4096):
+        self.maximo, self.limite = maximo, limite
+        self.items = []            # el mas reciente primero
+        self._ultimo = None
+        if cada > 0:
+            GLib.timeout_add_seconds(cada, self._tick)
+
+    def _tick(self):
+        try:
+            r = subprocess.run(["xclip", "-selection", "clipboard", "-o"],
+                               capture_output=True, text=True, timeout=1)
+        except Exception:
+            return True
+        txt = r.stdout
+        if not txt or not txt.strip() or len(txt) > self.limite:
+            return True
+        if txt == self._ultimo:
+            return True
+        self._ultimo = txt
+        # Repetido: sube al principio en vez de duplicarse.
+        self.items = [x for x in self.items if x != txt]
+        self.items.insert(0, txt)
+        del self.items[self.maximo:]
+        return True
+
+    def busca(self, q, tope=3):
+        ql = q.lower()
+        return [x for x in self.items if ql in x.lower()][:tope]
+
+
+# ----------------------------------------------------------- trabajo
+
+# Caracteres con los que una CLI de IA marca "estoy trabajando" en el
+# titulo del terminal: el girador. Claude Code usa los cuartos de
+# circulo; se añaden los de puntos por si otra usa esos.
+GIRADORES = "\u25d0\u25d3\u25d1\u25d2\u25f4\u25f7\u25f6\u25f5" \
+            "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
+
+
+class Trabajo(object):
+    """Avisa cuando una IA termina en una ventana que NO estas mirando.
+
+    La señal es el titulo del terminal: mientras trabaja lleva delante
+    un girador, y al acabar desaparece. Vale para cualquier CLI que
+    haga eso, sin configurarla.
+
+    Por que no avisa con la ventana enfocada: porque entonces lo estas
+    viendo. El aviso es para cuando te has ido a otra cosa.
+
+    Por que no avisa de los trabajos cortos: una respuesta de tres
+    segundos no necesita aviso, y avisar de todas convierte el notch en
+    ruido.
+
+    Y por que BARRE en vez de enterarse al cambiar el foco, que fue la
+    primera version: la IA tarda un instante en arrancar dentro de la
+    ventana nueva, asi que al llegarle el foco todavia no cuelga de
+    ella ningun proceso que se llame claude. Esa version no registraba
+    la ventana jamas. Comprobado con una ventana de mentira.
+    """
+    def __init__(self, on_fin, minimo=10.0, cada=5):
+        self.on_fin = on_fin
+        self.minimo = minimo
+        self.cada = cada
+        self.vistas = {}       # id de ventana -> {"ia", "app", "ocupado", "desde"}
+        self._cuenta = 0
+        GLib.timeout_add_seconds(1, self._tick)
+
+    def _barrido(self):
+        """Busca ventanas de IA. Un solo `ps` cada varios segundos; la
+        lista de ventanas y sus pid salen del servidor X, sin procesos."""
+        arbol = _ps_arbol()
+        for win in ventanas():
+            if win in self.vistas:
+                continue
+            pids = _cardinales(win, b"_NET_WM_PID")
+            ia = _ia_en(pids[0], arbol) if pids else None
+            if ia:
+                self.vistas[win] = {"ia": ia[0], "app": ia[1],
+                                    "ocupado": False, "desde": 0.0}
+
+    def _tick(self):
+        if self._cuenta % self.cada == 0:
+            self._barrido()
+        self._cuenta += 1
+        if not self.vistas:
+            return True
+
+        activa = _cardinales(_raiz(), b"_NET_ACTIVE_WINDOW")
+        enfocada = activa[0] if activa else 0
+        ahora = time.monotonic()
+        for win, est in list(self.vistas.items()):
+            tit = titulo(win)
+            if not tit:
+                del self.vistas[win]        # la ventana ya no esta
+                continue
+            ocupado = tit[0] in GIRADORES
+            if ocupado and not est["ocupado"]:
+                est["desde"] = ahora
+            elif est["ocupado"] and not ocupado:
+                tardo = ahora - est["desde"]
+                if tardo >= self.minimo and win != enfocada:
+                    self.on_fin(est["ia"], est["app"], tardo)
+            est["ocupado"] = ocupado
+        return True
+
+
+def _run_quieto(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=2).stdout.strip()
+    except Exception:
+        return ""
+
+
+# -------------------------------------------------------------- micro
+
+class Micro(object):
+    """Quien esta capturando audio AHORA, via 'pw-mon'.
+
+    Por eventos y no sondeando: pw-mon suelta el inventario entero al
+    arrancar y despues solo lo que cambia, igual que 'bspc subscribe'.
+    Preguntarle a wpctl cada dos segundos habria sido un proceso nuevo
+    cada dos segundos para una respuesta que casi siempre es "nadie".
+
+    Lo que se busca en su salida es `media.class = "Stream/Input/Audio"`,
+    que es como PipeWire llama a un flujo que LEE del microfono. Los
+    `Audio/Source` son el dispositivo en si y estan siempre ahi; no
+    significan que nadie escuche.
+    """
+    def __init__(self, on_change):
+        self.on_change = on_change
+        self.capturando = {}       # id de nodo -> nombre del programa
+        self.proc = None
+        self._accion, self._id, self._nombre = "", None, ""
+        self.start()
+
+    def start(self):
+        try:
+            self.proc = subprocess.Popen(
+                ["pw-mon"], stdout=subprocess.PIPE, text=True, bufsize=1)
+        except OSError:
+            return
+        GLib.io_add_watch(self.proc.stdout, GLib.PRIORITY_DEFAULT,
+                          GLib.IO_IN | GLib.IO_HUP, self._on_line)
+
+    @property
+    def abierto(self):
+        return bool(self.capturando)
+
+    @property
+    def quien(self):
+        return ", ".join(sorted(set(self.capturando.values())))
+
+    def _on_line(self, src, cond):
+        if cond & GLib.IO_HUP:
+            return False
+        linea = src.readline()
+        if not linea:
+            return False
+        antes = self.abierto
+        self._parse(linea.rstrip("\n"))
+        if self.abierto != antes:
+            self.on_change()
+        return True
+
+    def _parse(self, linea):
+        # pw-mon dibuja un arbol: las lineas vienen con caracteres de
+        # caja delante ("  |- |-- media.class = ..."), no con
+        # tabulaciones, asi que hay que pelarlas antes de mirar nada.
+        # Esto costo la primera version entera: el parser no casaba una
+        # sola linea y el indicador no se encendia nunca.
+        cruda = linea.rstrip()
+        s = cruda.strip().lstrip("\u2502\u251c\u2514\u2500- \t")
+
+        if cruda in ("added:", "changed:", "removed:"):
+            self._accion = cruda[:-1]
+            self._id = None
+            self._nombre = ""
+            return
+        if s.startswith("id:"):
+            try:
+                self._id = int(s.split(":", 1)[1])
+            except ValueError:
+                self._id = None
+            # Un "removed" trae el id y nada mas, asi que se atiende aqui.
+            if self._accion == "removed" and self._id is not None:
+                self.capturando.pop(self._id, None)
+        elif "application.name" in s:
+            self._nombre = s.split("=", 1)[-1].strip().strip('"')
+        elif "node.name" in s and not self._nombre:
+            self._nombre = s.split("=", 1)[-1].strip().strip('"')
+        elif "media.class" in s and self._id is not None:
+            # Se decide en cuanto se sabe, sin esperar a que el bloque
+            # termine: los bloques no tienen marca de fin.
+            if '"Stream/Input/Audio"' in s:
+                # El dictado de la propia isla no cuenta: ya tiene su
+                # tarjeta con la onda, y avisar ahi de que el microfono
+                # esta abierto seria decir dos veces lo mismo.
+                if self._nombre != "island-dictado":
+                    self.capturando[self._id] = self._nombre or "algo"
+            else:
+                self.capturando.pop(self._id, None)
 
 
 # --------------------------------------------------------------- fifo

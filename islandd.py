@@ -117,6 +117,14 @@ class Island(Gtk.Window):
         # disponible. Solo se consulta cuando el foco cambia (ver
         # sources.Foco), no en bucle.
         self.foco = sources.Foco(self._on_foco)
+        # Quien captura audio, sea quien sea. Ahora que la isla sabe
+        # escuchar, lo honesto es que sea tambien la que avisa de que
+        # alguien escucha.
+        self.micro = sources.Micro(self._on_micro)
+        # Avisa cuando una IA termina en una ventana que no estas
+        # mirando, que es la unica vez que el aviso sirve de algo.
+        self.trabajo = sources.Trabajo(self._on_fin_ia, C.TRABAJO_MINIMO)
+        self.portapapeles = sources.Portapapeles(C.CLIP_MAX, C.CLIP_CADA)
         self.activities = {}
         # Ultimos niveles del microfono, para la onda del dictado. Tope
         # fijo: es una ventana deslizante, no un historial.
@@ -179,6 +187,7 @@ class Island(Gtk.Window):
         # es un aviso de que algo se ha encendido, y un pequeño remate
         # al llegar lo hace notar sin tener que parpadear para siempre.
         self.sp_mic = Spring(0.0, response=0.34, damping=0.70)
+        self.sp_rec = Spring(0.0, response=0.34, damping=0.70)
         self._cursor_ptr = None
         self.fifo = sources.Fifo(FIFO, self.on_event)
 
@@ -336,9 +345,32 @@ class Island(Gtk.Window):
         sources.fetch_art(url, 56, got)
         self.refresh()
 
+    def _on_micro(self):
+        """Alguien ha abierto o cerrado el microfono.
+
+        Al abrirse se despliega el notch unos segundos, porque el punto
+        rojo en reposo solo se ve si estas mirando y esto es justo lo
+        que hay que enterarse SIN mirar. Al cerrarse basta con que el
+        indicador desaparezca.
+        """
+        if self.micro.abierto:
+            self.activities["micro"] = Activity(
+                "micro", 35, 3.5, {"quien": self.micro.quien}, "pillx")
+        else:
+            self.activities.pop("micro", None)
+        self.refresh()
+
     def _on_foco(self):
         # Solo llega cuando la respuesta CAMBIA (ver sources.Foco), asi
         # que no hace falta comparar nada aqui.
+        self.refresh()
+
+    def _on_fin_ia(self, ia, app, segundos):
+        if os.environ.get("ISLAND_DEBUG"):
+            print("fin-ia: %s tras %.0fs" % (app, segundos), flush=True)
+        self.activities["fin-ia"] = Activity(
+            "fin-ia", 55, 8.0,
+            {"ia": ia, "app": app, "segundos": segundos}, "card")
         self.refresh()
 
     def on_event(self, ev):
@@ -567,6 +599,22 @@ class Island(Gtk.Window):
             ]), self.sp_mic)], tag="dictado"))
             row.add(R.Gap(T.GAP_GROUP))
             self._mic_en_fila = True
+        # Micro abierto por OTRO programa. Se queda mientras dure, no
+        # unos segundos: lo que importa de esto no es el aviso, es poder
+        # mirar el notch y saber si te estan escuchando.
+        quiere_rec = 1.0 if self.micro.abierto else 0.0
+        if self.sp_rec.target != quiere_rec:
+            self.sp_rec.set(quiere_rec)
+            self.ensure_tick()
+        if self.sp_rec.value > 0.01 or self.micro.abierto:
+            row.add(R.Row([R.Alfa(R.Row([
+                R.Dot(7, T.RED),
+                R.Gap(7),
+                self._ico("mic", 22, T.RED, T.G_MIC),
+            ]), self.sp_rec)], tag="micro"))
+            row.add(R.Gap(T.GAP_GROUP))
+            self._rec_en_fila = True
+
         # Solo aparece cuando esta activo: un icono permanente para un
         # estado que casi siempre esta apagado seria ruido fijo.
         if self.dnd:
@@ -646,6 +694,30 @@ class Island(Gtk.Window):
             return R.Row().add(
                 self._ico("bat-0", 34, T.RED, T.G_BAT[0]), R.Gap(16),
                 R.Text("Bateria %d%%" % d.get("pct", 0), T.F_TITLE, T.RED))
+
+        if k == "fin-ia":
+            segs = int(d.get("segundos") or 0)
+            cuanto = ("%d:%02d" % (segs // 60, segs % 60) if segs >= 60
+                      else "%d s" % segs)
+            fila = R.Row()
+            ia = d.get("ia") or ""
+            if ia:
+                fila.add(R.Icon("ia-" + ia, 30, T.FG,
+                                d.get("app") or "", T.F_TITLE), R.Gap(16))
+            return fila.add(
+                R.Text("Ha terminado", T.F_TITLE, T.FG),
+                R.Gap(T.GAP_ITEM),
+                R.Text("\u00b7", T.F_SUB, T.DIM2), R.Gap(T.GAP_ITEM),
+                R.Text(cuanto, T.F_SUB, T.DIM))
+
+        if k == "micro":
+            return R.Row().add(
+                R.Dot(8, T.RED), R.Gap(14),
+                self._ico("mic", 28, T.RED, T.G_MIC), R.Gap(14),
+                R.Text("Micr\u00f3fono abierto", T.F_TITLE, T.FG),
+                R.Gap(T.GAP_ITEM),
+                R.Text("\u00b7", T.F_SUB, T.DIM2), R.Gap(T.GAP_ITEM),
+                R.Text(self._clip(d.get("quien") or "", 28), T.F_SUB, T.DIM))
 
         if k == "dictado":
             estado = d.get("state") or "oyendo"
@@ -1045,9 +1117,18 @@ class Island(Gtk.Window):
         for a in sources.match_apps(self.apps, q, 6):
             out.append(("app", a[0], "Aplicaci\u00f3n", a[2], a[1]))
 
+        # Lo copiado que case con lo escrito. Solo CON busqueda: sin
+        # ella, el lanzador tiene que enseñar ventanas y aplicaciones,
+        # que es a lo que se abre el 95% de las veces.
+        for txt in self.portapapeles.busca(q):
+            una = " ".join(txt.split())
+            out.append(("clip", self._clip(una, 52),
+                        "Portapapeles \u00b7 \u23ce copia", None, txt))
+
         # Empate entre aplicaciones: gana la mas usada.
         out.sort(key=lambda r: (0 if r[0] == "calc" else
-                                1 if r[0] == "win" else 2,
+                                1 if r[0] == "win" else
+                                3 if r[0] == "clip" else 2,
                                 -sources.frec_score(r[4])))
 
         if not out and " " not in q and q.isascii():
@@ -1148,6 +1229,13 @@ class Island(Gtk.Window):
                                                        len(st["res"]) - 1)]
         self._close_panel()
         self.refresh()
+
+        if tipo == "clip":
+            ok = sources.copy_clipboard(carga)
+            self.on_event({"kind": "notify", "app": "Portapapeles",
+                           "body": self._clip(" ".join(carga.split()), 60)
+                                   if ok else "No se pudo copiar"})
+            return
 
         if tipo == "calc":
             ok = sources.copy_clipboard(carga)
@@ -1518,12 +1606,14 @@ class Island(Gtk.Window):
         # sitio en la fila, asi que el notch no puede encogerse hasta
         # que desaparece del todo, y eso pide una reconstruccion.
         act = self.current()
-        movio = self.sp_mic.step(dt)
-        moving |= movio
-        if (not movio and self.sp_mic.target == 0.0
-                and getattr(self, "_mic_en_fila", False)):
-            self._mic_en_fila = False
-            self.refresh()
+        for muelle, bandera in ((self.sp_mic, "_mic_en_fila"),
+                                (self.sp_rec, "_rec_en_fila")):
+            movio = muelle.step(dt)
+            moving |= movio
+            if (not movio and muelle.target == 0.0
+                    and getattr(self, bandera, False)):
+                setattr(self, bandera, False)
+                self.refresh()
 
         # La onda persigue a los niveles que manda el microfono. Llegan
         # doce veces por segundo y esto corre a sesenta: sin perseguir,

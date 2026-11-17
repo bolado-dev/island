@@ -61,6 +61,7 @@ def traza(que, t0):
         pass
 
 
+NOMBRE_FLUJO = "island-dictado"
 RATE = 16000                 # lo que quiere whisper; remuestrear seria peor
 CHUNK = 0.08                 # cada cuanto se manda un nivel a la isla
 SILENCIO_DB = -50.0          # suelo de la onda
@@ -178,9 +179,14 @@ def grabar(destino):
     `pw-record`, no de un segundo flujo de audio: abrir el microfono dos
     veces es pedirle al servidor de sonido que lo mezcle para nada.
     """
+    # El flujo se presenta con nombre propio para que el aviso de
+    # "micro abierto" de la isla sepa que este es suyo y no se avise a
+    # si mismo cada vez que dictas.
+    entorno = dict(os.environ,
+                   PIPEWIRE_PROPS='{ node.name = "%s" }' % NOMBRE_FLUJO)
     rec = subprocess.Popen(
         ["pw-record", "--rate", str(RATE), "--channels", "1",
-         "--format", "s16", WAV],
+         "--format", "s16", WAV], env=entorno,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Un Event y no una bandera: al soltar la tecla, la espera de abajo
@@ -270,7 +276,11 @@ def transcribir(dur=0.0):
         r = subprocess.run(
             [whisper, "-m", modelo, "-f", WAV, "-l", C.DICT_LANG,
              "-t", str(C.DICT_THREADS), "-nt", "-np",
-             "-ac", str(ventana(dur))],
+             "-ac", str(ventana(dur)),
+             # La pista de estilo y, con ella, quitar los tokens que no
+             # son habla: son los que producen los "(música)" y
+             # "[BLANK_AUDIO]" que luego hay que limpiar a mano.
+             "--prompt", C.DICT_PROMPT, "-sns"],
             capture_output=True, text=True, timeout=180)
     except Exception as e:
         return "", str(e)[:60]

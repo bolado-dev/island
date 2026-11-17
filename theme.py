@@ -222,6 +222,7 @@ G_RES = {
     "win":  ("\uf2d2", "Ventana"),
     "calc": ("\uf1ec", "Resultado"),
     "cmd":  ("\uf120", "Ejecutar"),
+    "clip": ("\uf0ea", "Portapapeles"),
 }
 F_HERO = ("Inter Display", "semibold", 32)
 
