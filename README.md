@@ -180,7 +180,7 @@ cosas hacen exactamente lo mismo, dejar algo en la ventana que tenías
 delante, y dos copias se habrían separado en cuanto una aprendiese algo.
 
 <p align="center">
-  <img src="docs/capture.png" alt="Tarjeta de captura: la miniatura de lo recién capturado, el tamaño en píxeles y tres botones redondos de abrir, carpeta y borrar" width="620">
+  <img src="docs/captura.gif" alt="Al pulsar el atajo el escritorio se atenua, una cruz sigue al cursor, se arrastra un rectángulo que enseña su tamaño en una pastilla, y al soltar baja el notch con la miniatura de lo capturado y tres botones" width="860">
 </p>
 
 **Capturas de pantalla.** `Print` selecciona una región, `ctrl + Print` coge la
@@ -218,7 +218,7 @@ reservar el hueco la tarjeta se encogía al señalar: lo que se movía era justo
 botón que estabas a punto de pulsar.
 
 <p align="center">
-  <img src="docs/selection.png" alt="Selector de región: el escritorio congelado y atenuado, la región elegida a brillo pleno con escuadras azules en las esquinas, y el tamaño en una pastilla negra" width="860">
+  <img src="docs/capture.png" alt="Tarjeta de captura: la miniatura de lo recién capturado, el tamaño en píxeles y tres botones redondos de abrir, carpeta y borrar" width="620">
 </p>
 
 **La selección es propia**, no la de otro programa. El escritorio se congela, se
