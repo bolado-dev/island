@@ -148,3 +148,17 @@ CMD_CARPETA  = "xdg-open"
 # la captura ANTERIOR, que es el caso frecuente) sale en la foto. Medido
 # en esta maquina: el repliegue tarda 0,35 s.
 CAPTURA_ESPERA = 0.40
+
+# Quien dibuja la seleccion de region: "flameshot" o "scrot".
+#
+# scrot congela la pantalla y no pinta NADA encima: solo cambia el
+# cursor y traza una linea fina al arrastrar. Funciona, pero al pulsar
+# el atajo parece que no ha pasado nada, y encima la pantalla congelada
+# refuerza esa idea.
+#
+# flameshot si tiene interfaz: atenua lo que no esta seleccionado, pone
+# la lupa con las coordenadas y deja anotar antes de aceptar. Se le pide
+# en crudo (--raw), asi que la imagen sale por su salida estandar y de
+# guardarla y copiarla se encarga esto; flameshot no ensena su propio
+# aviso ni duplica el fichero.
+CAPTURA_SELECTOR = "flameshot"

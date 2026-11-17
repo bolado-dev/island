@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Capturas de pantalla para la isla: disparas y el notch te la ensena.
 
-    captura.py select     # una region, con la pantalla congelada
+    captura.py select     # una region, con la interfaz de flameshot
     captura.py window     # la ventana enfocada
     captura.py screen     # la pantalla entera
 
@@ -88,9 +88,41 @@ def apartar_notch():
         time.sleep(C.CAPTURA_ESPERA)
 
 
+def _con_flameshot(destino):
+    """Seleccion con la interfaz de flameshot, en crudo.
+
+    --raw escupe el PNG por la salida estandar en vez de guardarlo, asi
+    que el fichero lo escribe esto: un solo sitio decide donde van las
+    capturas y como se llaman, y flameshot no ensena ademas su propio
+    aviso de guardado encima de la tarjeta de la isla.
+
+    Cancelar (Escape) devuelve cero bytes, que no es un fallo.
+    """
+    try:
+        r = subprocess.run(["flameshot", "gui", "--raw"],
+                           capture_output=True, timeout=180)
+    except FileNotFoundError:
+        return None, "falta"
+    except subprocess.SubprocessError:
+        return None, "La captura no termino"
+    if r.returncode != 0 or not r.stdout:
+        return None, ""
+    with open(destino, "wb") as f:
+        f.write(r.stdout)
+    return destino, ""
+
+
 def disparar(modo):
     os.makedirs(C.CAPTURA_DIR, exist_ok=True)
     destino = os.path.join(C.CAPTURA_DIR, time.strftime(C.CAPTURA_FMT))
+
+    if modo == "select" and C.CAPTURA_SELECTOR == "flameshot":
+        ruta, err = _con_flameshot(destino)
+        if err != "falta":
+            return ruta, err
+        # Sin flameshot instalado no se queda uno sin capturar: cae a
+        # scrot, que es la dependencia que el proyecto si declara.
+
     try:
         r = subprocess.run(["scrot", "-q", "100"] + MODOS[modo] + [destino],
                            capture_output=True, text=True, timeout=60)
