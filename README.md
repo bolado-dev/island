@@ -217,22 +217,40 @@ etiqueta vive en un sitio y no en tres chips que ensancharían la tarjeta-, y si
 reservar el hueco la tarjeta se encogía al señalar: lo que se movía era justo el
 botón que estabas a punto de pulsar.
 
-**La selección la dibuja flameshot**, y eso sí que se nota. La primera versión
-usaba `scrot --select`, que funciona pero no pinta **nada** encima: solo cambia
-el cursor y traza una línea fina al arrastrar. Al pulsar el atajo parecía que no
-había pasado nada, y su `--freeze` --que congela con `XGrabServer`, así que
-ningún otro cliente de X puede dibujar- reforzaba esa idea: pantalla quieta y
-cero señales. Flameshot atenúa lo que no has seleccionado, pone la lupa con las
-coordenadas y además deja **anotar** antes de aceptar.
+<p align="center">
+  <img src="docs/selection.png" alt="Selector de región: el escritorio congelado y atenuado, la región elegida a brillo pleno con escuadras azules en las esquinas, y el tamaño en una pastilla negra" width="860">
+</p>
 
-Se le pide en crudo (`flameshot gui --raw`): la imagen sale por su salida
-estándar y de guardarla y copiarla se encarga la isla, así que un solo sitio
-decide dónde van las capturas y cómo se llaman, y no salen dos avisos por la
-misma captura. Si flameshot no está, cae a `scrot` y no te quedas sin capturar;
-se elige con `CAPTURA_SELECTOR` en `config.py`.
+**La selección es propia**, no la de otro programa. El escritorio se congela, se
+atenúa, y lo que eliges se queda a brillo pleno: escuadras azules en las
+esquinas, el tamaño en una pastilla negra con la misma tipografía del notch, y
+una cruz tenue por el cursor antes de empezar. Arrastras y sueltas; `esc`, el
+botón derecho o un clic sin arrastrar cancelan.
+
+**Congela sin congelar X.** Lo primero que probé fue `scrot --select`, que no
+pinta **nada** encima --solo cambia el cursor y traza una línea fina al
+arrastrar-, así que al pulsar el atajo parecía que no había pasado nada. Y su
+`--freeze` lo hace con `XGrabServer`: mientras eliges, ningún otro cliente de X
+puede dibujar, y si el que captura se colgase, el escritorio entero se quedaría
+tieso detrás.
+
+Aquí es al revés: se saca una foto del escritorio --19 ms, y coincide con lo que
+da scrot al 0,00%- y se enseña a pantalla completa. Lo que ves está quieto
+porque es una foto, no porque el servidor esté bloqueado. De propina, la región
+se recorta de **esa misma foto**, así que ni el velo ni el marco ni la etiqueta
+pueden acabar dentro de la captura por mucho que se dibujen encima.
+
+Es una ventana `POPUP` a propósito: una normal la gestionaría bspwm, la
+colocaría en el mosaico y se vería el tirón. Y la captura de teclado se
+**reintenta** 24 veces cada 25 ms, porque con `super + shift + s` --que dispara
+al pulsar- sxhkd todavía tiene el teclado agarrado cuando esto arranca; al
+primer intento el servidor contesta `ALREADY_GRABBED` y sin reintentar el
+selector se cerraría solo sin decir nada. Mismo caso que el lanzador con
+`super + d`.
 
 La pantalla entera y la ventana siguen siendo `scrot`, que para eso no hace
-falta interfaz ninguna.
+falta interfaz ninguna. `CAPTURA_SELECTOR` en `config.py` devuelve la selección
+a scrot si algún día hace falta.
 
 `super + shift + s` hace lo mismo que `Print` a secas. Es un atajo de más a
 propósito: es el que está en los dedos de tanto usarlo, y una tecla que ya sabes
@@ -456,9 +474,9 @@ Opcionales, según lo que quieras que funcione: `playerctl` (reproducción),
 `nmcli` (wifi), `wpctl` de PipeWire (volumen), `dunst` (notificaciones),
 `xclip` (copiar desde la calculadora), `unicode-data` más
 `fonts-noto-color-emoji` para el selector de emoji, que sin la lista del
-sistema te dice que falta en vez de abrirse vacío, `scrot` para las capturas de
-pantalla y de ventana, y `flameshot` para la selección de región (sin él la hace
-`scrot`, pero sin interfaz).
+sistema te dice que falta en vez de abrirse vacío, y `scrot` para las capturas
+de pantalla y de ventana. La selección de región no necesita nada: la dibuja la
+propia isla.
 
 Para el dictado hacen falta además `pw-record` (PipeWire), `xclip`, `xdotool`
 (sin él el texto se queda en el portapapeles en vez de escribirse solo) y

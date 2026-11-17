@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Capturas de pantalla para la isla: disparas y el notch te la ensena.
 
-    captura.py select     # una region, con la interfaz de flameshot
+    captura.py select     # una region, con el selector de la isla
     captura.py window     # la ventana enfocada
     captura.py screen     # la pantalla entera
 
@@ -88,27 +88,24 @@ def apartar_notch():
         time.sleep(C.CAPTURA_ESPERA)
 
 
-def _con_flameshot(destino):
-    """Seleccion con la interfaz de flameshot, en crudo.
+def _seleccionar(destino):
+    """Seleccion con el selector propio (seleccion.py).
 
-    --raw escupe el PNG por la salida estandar en vez de guardarlo, asi
-    que el fichero lo escribe esto: un solo sitio decide donde van las
-    capturas y como se llaman, y flameshot no ensena ademas su propio
-    aviso de guardado encima de la tarjeta de la isla.
-
-    Cancelar (Escape) devuelve cero bytes, que no es un fallo.
+    Recorta de la MISMA foto que se ensena congelada, asi que ni el velo
+    ni el marco ni la etiqueta del tamano pueden acabar dentro de la
+    captura: lo que se guarda es el escritorio tal y como estaba al
+    pulsar el atajo.
     """
-    try:
-        r = subprocess.run(["flameshot", "gui", "--raw"],
-                           capture_output=True, timeout=180)
-    except FileNotFoundError:
-        return None, "falta"
-    except subprocess.SubprocessError:
-        return None, "La captura no termino"
-    if r.returncode != 0 or not r.stdout:
+    import seleccion
+    rect, foto = seleccion.elegir()
+    if rect is None or foto is None:
         return None, ""
-    with open(destino, "wb") as f:
-        f.write(r.stdout)
+    x, y, w, h = rect
+    w = min(w, foto.get_width() - x)
+    h = min(h, foto.get_height() - y)
+    if w <= 0 or h <= 0:
+        return None, ""
+    foto.new_subpixbuf(x, y, w, h).savev(destino, "png", [], [])
     return destino, ""
 
 
@@ -116,12 +113,8 @@ def disparar(modo):
     os.makedirs(C.CAPTURA_DIR, exist_ok=True)
     destino = os.path.join(C.CAPTURA_DIR, time.strftime(C.CAPTURA_FMT))
 
-    if modo == "select" and C.CAPTURA_SELECTOR == "flameshot":
-        ruta, err = _con_flameshot(destino)
-        if err != "falta":
-            return ruta, err
-        # Sin flameshot instalado no se queda uno sin capturar: cae a
-        # scrot, que es la dependencia que el proyecto si declara.
+    if modo == "select" and C.CAPTURA_SELECTOR != "scrot":
+        return _seleccionar(destino)
 
     try:
         r = subprocess.run(["scrot", "-q", "100"] + MODOS[modo] + [destino],
