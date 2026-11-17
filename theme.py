@@ -281,3 +281,18 @@ DICT_OK      = GREEN  # texto listo
 # puntos suspensivos.
 DICT_LINEAS  = 3
 DICT_COLS    = 58     # caracteres por linea antes de partir
+
+# ---------------------------------------------------------------- emoji
+# El selector (super + .). La rejilla es de ancho fijo: 10 x 52 = 520,
+# casi el ancho del lanzador, asi que los dos paneles de teclado miden
+# practicamente lo mismo y la isla no da un salto al pasar de uno a otro.
+EMO_COLS  = 10
+EMO_FILAS = 5         # 50 a la vista; con 6 el panel pasaba de WIN_H
+EMO_CELDA = 52        # la celda; el emoji dentro mide 37
+EMO_ANCHO = EMO_COLS * EMO_CELDA
+
+# Noto Color Emoji es de mapas de bits, pero escala fino: a 30 px
+# pedidos todos los emoji salen de 37x36 EXACTOS, banderas, teclas y
+# familias de cuatro incluidas. De ahi que la rejilla pueda ser
+# uniforme sin medir celda por celda.
+F_EMOJI   = ("Noto Color Emoji", "normal", 30)

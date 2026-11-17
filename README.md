@@ -130,6 +130,55 @@ meter un segundo bucle de eventos de X dentro de una aplicación GTK. Medido,
 la alternativa tonta sale a 0,1% de un núcleo: un `xclip -o` son 3 ms, uno
 cada tres segundos.
 
+<p align="center">
+  <img src="docs/emoji.gif" alt="Al pulsar super y punto el notch se despliega en una rejilla de emoji en color; al escribir fuego la rejilla se queda en una fila y al pulsar intro el panel se cierra y el notch vuelve a replegarse" width="760">
+</p>
+
+**Selector de emoji**, en `super + .` como el de Windows. Escribes, eliges y el
+emoji aparece **en la ventana que tenías delante**, no en el portapapeles para
+que lo pegues tú. Las flechas mueven, el tabulador salta de grupo y los que
+más usas salen los primeros.
+
+**Busca en castellano**, que es lo que uno escribe: «fuego» encuentra 🔥 y
+«cohete» 🚀. Los nombres salen de [CLDR](https://github.com/unicode-org/cldr)
+y los baja `fetch-icons.sh`; hacen falta sus dos ficheros, porque
+`annotations` solo trae los emoji de un carácter y sin `annotationsDerived`
+—la familia de cuatro, las banderas, los oficios— se queda en el 83%. También
+busca por el nombre en inglés, porque media jerga de emoji se dice así. Sin
+el fichero no se rompe nada: se busca solo en inglés, que es lo que trae el
+sistema.
+
+**La lista es la del sistema, no una copia.** `emoji-test.txt` (paquete
+`unicode-data`) es la lista oficial del consorcio, con el orden y los grupos
+ya decididos por ellos y pensados justo para una paleta de teclado. De los
+3947 que trae se enseñan 1914: se quitan las variantes de tono de piel, que
+multiplican por seis cada emoji de persona y dejarían la rejilla llena de la
+misma mano repetida.
+
+**La rejilla puede ser uniforme porque se midió.** A 30 píxeles, los 1914
+emoji miden 37 × 36 **exactos** con Noto Color Emoji —banderas, teclas y
+familias de cuatro incluidas—, así que la celda es fija y las columnas salen
+rectas sin medir una por una.
+
+**Y se filtra lo que la fuente no sepa dibujar**, porque los datos de Unicode
+van por delante de las fuentes y un emoji sin glifo sale como un cuadro vacío.
+No vale preguntar por los glifos desconocidos, que es lo que uno haría:
+fontconfig tapa el hueco con otra fuente y Pango informa de cero. Lo que sí se
+ve es el **ancho**: un emoji dibujado de verdad ocupa una casilla y una
+secuencia que la fuente no conoce se descompone en sus piezas y ocupa el
+doble exacto. Son 150 ms una vez, en un hilo mientras arranca el escritorio,
+para que abrir el selector no espere nunca.
+
+Un detalle que obligó a que los emoji no sean texto normal: **una fuente de
+color ignora el color de origen de cairo, y con él el alfa**. Pidiendo
+`rgba(1,1,1,0)` el emoji sale igual de opaco, así que con un `Text` corriente
+se habría colado entero en mitad de los fundidos de la isla. Dibujarlo en un
+grupo y volcarlo con `paint_with_alpha` sí funde.
+
+El pegado es el mismo código que el del dictado (`sources.pegar`): las dos
+cosas hacen exactamente lo mismo, dejar algo en la ventana que tenías
+delante, y dos copias se habrían separado en cuanto una aprendiese algo.
+
 **Reproducción.** Lo que suene por MPRIS aparece con carátula y controles.
 
 <p align="center">
@@ -161,6 +210,10 @@ punto rojo mientras dure. Ahora que la isla sabe escuchar, lo honesto es que
 sea también la que dice cuándo alguien escucha. Por eventos de PipeWire
 (`pw-mon`), sin sondear, y el dictado se identifica con nombre propio para no
 avisarse a sí mismo.
+
+<p align="center">
+  <img src="docs/dictado.gif" alt="Mientras hablas el notch enseña un micrófono rojo y la onda del sonido junto a la palabra Escuchando; al soltar pasa a Transcribiendo y luego a la frase transcrita con una marca verde y el logo de la IA a la que va" width="760">
+</p>
 
 **Dictado por voz.** Mantén `super + v`, habla y suéltala: la isla se
 despliega con la onda del micrófono, transcribe en local y escribe el texto
@@ -283,6 +336,16 @@ Y mientras grabas, un nivel nuevo **no reconstruye el contenido del notch**:
 la onda lee la lista en vivo al dibujar, así que doce veces por segundo solo
 se repinta, no se vuelve a medir con Pango un texto que no ha cambiado.
 
+**Hay un modo demo**, `dictado.py demo ["frase"]`, que recorre la tarjeta entera
+sin abrir el micrófono: con él está grabado el GIF de arriba. No dibuja una onda
+de adorno —eso sería enseñar algo que el programa no hace—: sintetiza audio con
+la envolvente de alguien diciendo esa frase, una ráfaga por sílaba y pausas
+entre palabras, y lo pasa por el **mismo `nivel()`** que procesa el micrófono. La
+ventana de destino sí es la de verdad, así que lanzado desde una terminal con una
+IA dentro sale su logo. El ruido lleva semilla fija: un demo que sale distinto
+cada vez no sirve ni para comparar dos versiones ni para volver a grabar el
+mismo GIF.
+
 Lo que no hace, a propósito: **el micrófono no se abre solo nunca**. Se abre
 cuando pulsas la tecla y se cierra cuando la sueltas. Un dictado que escucha
 "por si acaso" es un micro abierto en tu escritorio todo el día.
@@ -332,7 +395,9 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-rsvg-2.0
 
 Opcionales, según lo que quieras que funcione: `playerctl` (reproducción),
 `nmcli` (wifi), `wpctl` de PipeWire (volumen), `dunst` (notificaciones),
-`xclip` (copiar desde la calculadora).
+`xclip` (copiar desde la calculadora), y `unicode-data` más
+`fonts-noto-color-emoji` para el selector de emoji, que sin la lista del
+sistema te dice que falta en vez de abrirse vacío.
 
 Para el dictado hacen falta además `pw-record` (PipeWire), `xclip`, `xdotool`
 (sin él el texto se queda en el portapapeles en vez de escribirse solo) y
@@ -348,7 +413,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 Y `./fetch-icons.sh`, que además de los iconos de Solar baja los logos de las
 IA a `icons/`. No se versionan, como el resto del arte ajeno, y aquí pesa más
 el motivo: son marcas registradas. Sin ellos no se rompe nada, el notch enseña
-el nombre en texto.
+el nombre en texto. Baja también los nombres de emoji en castellano a
+`emoji-es.json`, que tampoco se versiona: es un dato derivado de algo que se
+actualiza solo, y tenerlo dentro del repo significa tenerlo desactualizado.
 
 Y el atajo, en tu `sxhkdrc`. El soltado es un atajo distinto (`@`), que es lo
 que lo convierte en push-to-talk de verdad:
@@ -360,6 +427,17 @@ super + v
 @super + v
 	~/.config/island/dictado.py stop
 ```
+
+Y el del selector de emoji, que no necesita nada más:
+
+```
+super + period
+	~/.config/island/island-send panel --target emoji
+```
+
+Ojo si vienes de la configuración de ejemplo de bspwm: ahí `super + .` es uno
+de los cuatro saltos de nodo (`bspc node -f @second`), así que hay que
+sacárselo de esa línea.
 
 ```sh
 git clone https://github.com/bolado-dev/island ~/.config/island
@@ -408,6 +486,9 @@ que se bajan con `./fetch-icons.sh`.
   identificar.** Chrome no publica el origen: llegan con nombre «Google
   Chrome» y sin icono. Instalar el sitio como aplicación de Chrome sí hace que
   mande el nombre y el favicon correctos.
+- **Los emoji se insertan sin tono de piel.** En la rejilla está el neutro
+  y nada más: las cinco variantes multiplican por seis cada emoji de
+  persona, y un selector de tono es otra interfaz encima de esta.
 - **La interfaz está en español.** Las cadenas están sueltas en el código, sin
   gettext.
 

@@ -114,3 +114,18 @@ TRABAJO_MINIMO = 0.0
 # contraseñas, y lo que no se guarda no se filtra.
 CLIP_MAX  = 20
 CLIP_CADA = 3
+
+# ---------------------------------------------------------------- emoji
+# Selector de emoji (super + .). Los datos NO se versionan: los trae el
+# sistema. emoji-test.txt es la lista oficial del consorcio Unicode, con
+# el orden y los grupos ya decididos por ellos, y viene en el paquete
+# `unicode-data`. Mantener aqui una copia propia seria quedarse atras en
+# cada version de Unicode sin ganar nada.
+#
+# Si el fichero no esta, el selector lo dice y no se abre.
+EMOJI_DATA = "/usr/share/unicode/emoji/emoji-test.txt"
+
+# Nombres y palabras clave en espanol, para poder buscar "fuego" y no
+# "fire". Los genera fetch-icons.sh desde CLDR; si falta el fichero se
+# busca en ingles, que es lo que trae emoji-test.txt.
+EMOJI_ES = os.path.expanduser("~/.config/island/emoji-es.json")

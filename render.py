@@ -843,3 +843,122 @@ class Alfa(object):
         if k <= 0.001:
             return
         self.hijo.draw(cr, x, cy, a * k)
+
+
+# ---------------------------------------------------------------- emoji
+
+# Cache propia, aparte de la de los textos.
+#
+# Una pagina del selector son 50 emoji, y navegando se recorren los
+# 1914: compartir la cache de textos la haria desbordar y vaciarse cada
+# cuatro paginas, llevandose por delante el reloj y los porcentajes, que
+# si se repiten en cada fotograma.
+_emoji_cache = {}
+_EMOJI_MAX = 2048
+
+
+def _emoji_layout(cr, ch):
+    l = _emoji_cache.get(ch)
+    if l is None:
+        if len(_emoji_cache) >= _EMOJI_MAX:
+            _emoji_cache.clear()
+        l = PangoCairo.create_layout(cr)
+        l.set_font_description(font_desc(T.F_EMOJI))
+        l.set_text(ch, -1)
+        _emoji_cache[ch] = l
+    return l
+
+
+def emoji_soportados(entradas):
+    """Filtra los emoji que la fuente instalada NO sabe dibujar.
+
+    Hace falta porque los datos de Unicode van por delante de las
+    fuentes: el fichero del sistema puede describir emoji que la Noto
+    instalada no tiene, y en la rejilla saldrian como cuadros vacios.
+
+    No se puede preguntar por el numero de glifos desconocidos, que es
+    lo que uno esperaria: fontconfig tapa el hueco con OTRA fuente, asi
+    que Pango informa de cero y el cuadro aparece igual. Lo que si se ve
+    es el ANCHO. Un emoji dibujado de verdad ocupa una casilla; una
+    secuencia que la fuente no conoce se descompone en sus piezas y
+    ocupa dos o mas. Comprobado con secuencias inventadas: salen al
+    doble de ancho exacto.
+
+    Son ~150 ms para los 1914, de una vez por arranque.
+    """
+    if not entradas:
+        return []
+    s = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
+    cr = cairo.Context(s)
+    ref = _emoji_layout(cr, "\U0001F600").get_pixel_size()[0]
+    tope = ref * 1.4
+    out = []
+    for e in entradas:
+        l = _emoji_layout(cr, e[0])
+        if l.get_pixel_size()[0] <= tope and l.get_unknown_glyphs_count() == 0:
+            out.append(e)
+    # Los layouts de los descartados no vuelven a hacer falta.
+    _emoji_cache.clear()
+    return out
+
+
+class Emoji(object):
+    """Un emoji, con los colores de la fuente.
+
+    No es un Text con otra fuente, y la diferencia esta medida: una
+    fuente de color se pinta con SUS colores e ignora por completo el
+    origen de cairo, el alfa incluido. Pidiendo rgba(1,1,1,0) el emoji
+    sale igual de opaco (misma suma de alfa con 1.0, 0.5 y 0.0), asi que
+    con Text se habria colado entero en mitad de los fundidos de la
+    isla, sin desvanecerse con el resto del contenido.
+
+    Dibujarlo en un grupo y volcarlo con paint_with_alpha si funde: a
+    mitad de fundido el alfa maximo es 128 de 255, y a cero no queda
+    nada.
+    """
+    def __init__(self, ch, alpha=1.0, tag=None):
+        self.ch, self.alpha, self.tag = ch, alpha, tag
+
+    def size(self, cr):
+        return _emoji_layout(cr, self.ch).get_pixel_size()
+
+    def draw(self, cr, x, cy, a):
+        l = _emoji_layout(cr, self.ch)
+        w, h = l.get_pixel_size()
+        if self.tag:
+            _record(self.tag, x, cy, w, h)
+        PangoCairo.update_layout(cr, l)
+        cr.push_group()
+        cr.move_to(x, cy - h / 2.0)
+        cr.set_source_rgba(1, 1, 1, 1)
+        PangoCairo.show_layout(cr, l)
+        cr.pop_group_to_source()
+        cr.paint_with_alpha(max(0.0, min(1.0, self.alpha * a)))
+
+
+class Cell(object):
+    """Casilla de tamano fijo que centra lo que lleva dentro.
+
+    Box fuerza el ancho pero alinea a la izquierda, que es lo que quiere
+    una lista. Una rejilla quiere lo contrario: que cada cosa caiga en el
+    centro de su casilla, para que las columnas salgan rectas aunque lo
+    de dentro mida distinto.
+    """
+    def __init__(self, inner, w, h, bg=None, radius=14, tag=None):
+        self.inner, self.w, self.h = inner, w, h
+        self.bg, self.radius, self.tag = bg, radius, tag
+
+    def size(self, cr):
+        return self.w, self.h
+
+    def draw(self, cr, x, cy, a):
+        if self.tag:
+            _record(self.tag, x, cy, self.w, self.h, pad=0)
+        if self.bg is not None:
+            m = 3.0           # aire para que el realce no toque al vecino
+            capsule(cr, x + m, cy - self.h / 2.0 + m,
+                    self.w - 2 * m, self.h - 2 * m, self.radius)
+            cr.set_source_rgba(*self.bg, a)
+            cr.fill()
+        iw, _ih = self.inner.size(cr)
+        self.inner.draw(cr, x + (self.w - iw) / 2.0, cy, a)

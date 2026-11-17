@@ -15,6 +15,7 @@ import math
 import locale
 import calendar
 import textwrap
+import threading
 from collections import deque
 import datetime
 import gi
@@ -157,6 +158,8 @@ class Island(Gtk.Window):
         self.sp_pop = Spring(T.SEG_SLOT, response=T.SP_POP_RESP,
                              damping=T.SP_POP_DAMP)
         self.launch = None        # estado del lanzador de aplicaciones
+        self.emo = None           # estado del selector de emoji
+        self.emo_destino = {}     # ventana donde ira el emoji
         self.apps = []            # indice de .desktop (se llena en diferido)
         self.wins = []            # ventanas abiertas (se lee al abrir)
         self._drag = None
@@ -947,6 +950,9 @@ class Island(Gtk.Window):
         if which == "launcher":
             return self.build_launcher(cr)
 
+        if which == "emoji":
+            return self.build_emoji(cr)
+
         if which == "powermenu":
             cur = self.hover or ""
             lbl_w = max(R.Text(a[0], T.F_SUB, T.FG).size(cr)[0]
@@ -1267,12 +1273,233 @@ class Island(Gtk.Window):
             self.on_event({"kind": "notify", "app": "Lanzador",
                            "body": "No se pudo ejecutar"})
 
+    # ------------------------------------------------ selector de emoji
+
+    def _start_emoji(self):
+        if not sources.emoji_index():
+            # Sin la lista de Unicode no hay nada que enseñar. Se dice en
+            # vez de abrir una rejilla vacia, y se dice DONDE buscarla.
+            self.on_event({"kind": "notify", "app": "Emoji",
+                           "body": "Falta %s (paquete unicode-data)"
+                                   % os.path.basename(C.EMOJI_DATA)})
+            self.refresh()
+            return
+
+        # La ventana de destino se mira AHORA, antes de capturar el
+        # teclado: es la que tenias delante al pulsar el atajo, y es
+        # donde va a caer el emoji. Mirarla al insertar daria la ventana
+        # equivocada si algo le robo el foco mientras elegias.
+        self.emo_destino = sources.ventana_enfocada()
+        self.emo = {"q": "", "sel": 0, "top": 0,
+                    "res": sources.emoji_buscar("")}
+        self.activities["panel"] = Activity(
+            "panel", 50, None, {"which": "emoji"}, "panel")
+
+        def fallo():
+            self.emo = None
+            self.activities.pop("panel", None)
+            self.on_event({"kind": "notify", "app": "Emoji",
+                           "body": "No se pudo capturar el teclado"})
+            self.refresh()
+
+        self._grab_retry(Gdk.SeatCapabilities.KEYBOARD
+                         | Gdk.SeatCapabilities.ALL_POINTING, fallo)
+        self._blink_id = GLib.timeout_add(530, self._blink)
+        self.refresh()
+
+    def _emo_vista(self):
+        """Deja visible la fila del seleccionado.
+
+        La rejilla no se desplaza sola con la seleccion: solo cuando
+        esta se sale por arriba o por abajo, y entonces lo justo para
+        volver a entrar. Recentrarla en cada tecla haria que el
+        contenido se moviese mientras la vista se queda quieta, que es
+        lo contrario de lo que espera quien mira.
+        """
+        st = self.emo
+        total = len(st["res"])
+        filas = (total + T.EMO_COLS - 1) // T.EMO_COLS
+        st["sel"] = max(0, min(st["sel"], total - 1))
+        fila = st["sel"] // T.EMO_COLS
+        if fila < st["top"]:
+            st["top"] = fila
+        elif fila >= st["top"] + T.EMO_FILAS:
+            st["top"] = fila - T.EMO_FILAS + 1
+        st["top"] = max(0, min(st["top"], max(0, filas - T.EMO_FILAS)))
+
+    def _emo_grupo(self, paso):
+        """Salta al primer emoji del grupo siguiente o anterior."""
+        st = self.emo
+        res = st["res"]
+        # Los indices donde cambia la etiqueta: son los comienzos de
+        # grupo. Se calculan aqui y no se guardan porque la lista cambia
+        # con cada letra que se escribe.
+        inicios = [0] + [i for i in range(1, len(res))
+                         if res[i][2] != res[i - 1][2]]
+        if paso > 0:
+            st["sel"] = next((i for i in inicios if i > st["sel"]),
+                             inicios[-1])
+        else:
+            previos = [i for i in inicios if i < st["sel"]]
+            st["sel"] = previos[-1] if previos else 0
+
+    def build_emoji(self, cr):
+        st = self.emo or {"q": "", "sel": 0, "top": 0, "res": []}
+        res = st["res"]
+        ANCHO = T.EMO_ANCHO
+
+        cab = R.Row().add(
+            self._ico("search", 28, T.DIM, T.G_SEARCH),
+            R.Gap(T.GAP_ITEM),
+            R.Field(ANCHO - 28 - T.GAP_ITEM, st["q"], T.F_SUB, T.FG,
+                    caret=self.caret_on, secret=False))
+        if not res:
+            return R.Stack([cab, R.Row().add(
+                R.Gap(T.GAP_ITEM),
+                R.Text("Ning\u00fan emoji se llama as\u00ed", T.F_SUB, T.DIM2))],
+                gap=T.GAP_ROW)
+
+        sel = min(st["sel"], len(res) - 1)
+        # Solo las filas que tengan algo. Buscando "fuego" salen ocho
+        # emoji, y cuatro filas vacias debajo serian un panel de 400 px
+        # con una sola fila dentro: el panel se ajusta a su contenido,
+        # como el del wifi con dos redes.
+        filas = (len(res) + T.EMO_COLS - 1) // T.EMO_COLS
+        rejilla = []
+        for f in range(st["top"], min(st["top"] + T.EMO_FILAS, filas)):
+            fila = R.Row()
+            for c in range(T.EMO_COLS):
+                i = f * T.EMO_COLS + c
+                if i >= len(res):
+                    # Lo que falta de la ULTIMA fila si va como hueco del
+                    # ancho de una celda: sin el, la fila mediria menos y
+                    # la isla se estrecharia al llegar al final de la
+                    # lista.
+                    fila.add(R.Gap(T.EMO_CELDA))
+                    continue
+                # SURF_2 y no el SURF_1 de las filas del lanzador: alli
+                # el realce es una banda de 560 px y con muy poco
+                # contraste ya se ve, aqui es un cuadrado de 52 y al
+                # mismo tono no se encontraba de un vistazo.
+                fila.add(R.Cell(R.Emoji(res[i][0]),
+                                T.EMO_CELDA, T.EMO_CELDA,
+                                bg=T.SURF_2 if i == sel else None,
+                                tag="emo:%d" % i))
+            rejilla.append(fila)
+
+        nombre = R.Text(self._clip(res[sel][1], 32), T.F_SMALL, T.FG)
+        grupo = R.Text(res[sel][2], T.F_SMALL, T.DIM2)
+        hueco = max(10, ANCHO - nombre.size(cr)[0] - grupo.size(cr)[0])
+        return R.Stack([
+            cab,
+            R.Stack(rejilla, gap=0),
+            R.Rule(ANCHO, T.DIM2),
+            R.Row([nombre, R.Gap(hueco), grupo]),
+            R.Row().add(R.Text(
+                "\u2190\u2192\u2191\u2193 mover \u00b7 \u21e5 grupo "
+                "\u00b7 \u23ce insertar \u00b7 esc cerrar",
+                T.F_SMALL, T.DIM2)),
+        ], gap=10)
+
+    def _key_emoji(self, ev):
+        st = self.emo
+        kv = ev.keyval
+        pag = T.EMO_COLS * T.EMO_FILAS
+        if kv == Gdk.KEY_Escape:
+            self._close_panel()
+            self.refresh()
+            return True
+        if kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self._emoji_sel()
+            return True
+        if kv == Gdk.KEY_Right:
+            st["sel"] += 1
+        elif kv == Gdk.KEY_Left:
+            st["sel"] -= 1
+        elif kv == Gdk.KEY_Down:
+            # En la ultima fila incompleta, bajar lleva al final de la
+            # lista en vez de no hacer nada: es el gesto de "lo de mas
+            # abajo", y quedarse quieto se lee como que la tecla no va.
+            st["sel"] = (st["sel"] + T.EMO_COLS
+                         if st["sel"] + T.EMO_COLS < len(st["res"])
+                         else len(st["res"]) - 1)
+        elif kv == Gdk.KEY_Up:
+            if st["sel"] >= T.EMO_COLS:
+                st["sel"] -= T.EMO_COLS
+        elif kv in (Gdk.KEY_Page_Down, Gdk.KEY_Next):
+            st["sel"] += pag
+        elif kv in (Gdk.KEY_Page_Up, Gdk.KEY_Prior):
+            st["sel"] -= pag
+        elif kv == Gdk.KEY_Home:
+            st["sel"] = 0
+        elif kv == Gdk.KEY_End:
+            st["sel"] = len(st["res"]) - 1
+        elif kv == Gdk.KEY_Tab:
+            self._emo_grupo(+1)
+        elif kv == Gdk.KEY_ISO_Left_Tab:
+            self._emo_grupo(-1)
+        elif kv == Gdk.KEY_BackSpace:
+            st["q"] = st["q"][:-1]
+            st["res"] = sources.emoji_buscar(st["q"])
+            st["sel"] = st["top"] = 0
+        else:
+            ch = Gdk.keyval_to_unicode(kv)
+            if ch < 32:
+                return True
+            st["q"] += chr(ch)
+            st["res"] = sources.emoji_buscar(st["q"])
+            st["sel"] = st["top"] = 0
+        self._emo_vista()
+        self.refresh()
+        return True
+
+    def _emoji_sel(self):
+        st = self.emo
+        if not st or not st["res"]:
+            return
+        ch, nombre = st["res"][min(st["sel"], len(st["res"]) - 1)][:2]
+        destino = self.emo_destino
+        self._close_panel()
+        self.refresh()
+        sources.frec_bump("emoji:" + ch)
+
+        # El pegado es una pulsacion sintetica de Ctrl+V, asi que la
+        # captura del teclado tiene que estar DE VERDAD soltada antes de
+        # mandarla: si no, se la come la propia isla. _close_panel se lo
+        # pide a X, y sync espera a que X lo haya hecho. Es lo mismo que
+        # un retardo de cortesia, pero medido por el servidor en vez de
+        # adivinado.
+        gd = self.get_display()
+        if gd is not None:
+            gd.sync()
+
+        def trabajo():
+            # En un hilo: son ~100 ms de xclip y xdotool, y pagarlos en
+            # el hilo de GTK se veria como un tiron justo en la
+            # animacion de cierre.
+            como = sources.pegar(ch, destino)
+            GLib.idle_add(self._tras_emoji, ch, nombre, como)
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _tras_emoji(self, ch, nombre, como):
+        if como == "escrito":
+            # Ya esta donde querias: avisar de lo que acabas de ver
+            # aparecer solo seria ruido.
+            return False
+        self.on_event({"kind": "notify", "app": "Emoji",
+                       "body": ("%s %s copiado" % (ch, nombre))
+                               if como == "portapapeles"
+                               else "No se pudo copiar %s" % ch})
+        return False
+
     def open_panel(self, which):
         act = self.activities.get("panel")
         if act is not None and act.data.get("which") == which:
             self._close_panel()                    # el mismo icono cierra
         elif which == "launcher":
             self._start_launcher()                 # necesita teclado
+        elif which == "emoji":
+            self._start_emoji()                    # tambien
         else:
             # volumen y energia caben en una fila: pildora alta en vez
             # de panel, que reserva padding vertical de tarjeta.
@@ -1384,6 +1611,7 @@ class Island(Gtk.Window):
         del campo y descarta la actividad."""
         self.pw = None
         self.launch = None
+        self.emo = None
         b = getattr(self, "_blink_id", None)
         if b:
             GLib.source_remove(b)
@@ -1424,6 +1652,8 @@ class Island(Gtk.Window):
             self._arm_guard()
         if self.launch is not None:
             return self._key_launcher(ev)
+        if self.emo is not None:
+            return self._key_emoji(ev)
         if self.pw is None:
             return False
         kv = ev.keyval
@@ -1893,6 +2123,9 @@ class Island(Gtk.Window):
         elif tag.startswith("app:"):
             self.launch["sel"] = int(tag[4:])
             self._launch_sel()
+        elif tag.startswith("emo:"):
+            self.emo["sel"] = int(tag[4:])
+            self._emoji_sel()
         elif tag == "vol-slider":
             self._drag = "vol-slider"
             self._slide(ev.x, rect)
@@ -1938,7 +2171,7 @@ class Island(Gtk.Window):
                         "vol-mixer", "clock")
                 or tag == "dnd" or tag.startswith("ws")
                 or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
-                                   "ds:", "media:")))
+                                   "ds:", "media:", "emo:")))
 
     def _set_cursor(self, pointer):
         if pointer == self._cursor_ptr:
@@ -1973,6 +2206,11 @@ class Island(Gtk.Window):
             # Apuntar una fila la selecciona, para que raton y teclado
             # compartan una unica nocion de "el que se va a lanzar".
             self.launch["sel"] = int(tag[4:])
+        if tag is not None and tag.startswith("emo:") and self.emo:
+            # Lo mismo en la rejilla: apuntar una casilla la selecciona,
+            # asi que el pie dice siempre el nombre de lo que hay debajo
+            # del puntero.
+            self.emo["sel"] = int(tag[4:])
         if "panel" in self.activities:
             self.refresh()
         self.ensure_tick()
@@ -2062,6 +2300,12 @@ def main():
     GLib.set_prgname("island")
     Gdk.set_program_class("Island")
     win = Island()
+    # La lista de emoji (~240 ms: leer el fichero de Unicode y preguntar
+    # a la fuente cual sabe dibujar) se construye en un hilo mientras
+    # arranca el escritorio. Hacerlo al abrir el selector por primera
+    # vez se notaria justo ahi, y hacerlo aqui en el hilo de GTK
+    # retrasaria el primer dibujado de la isla.
+    sources.emoji_precarga()
     Gtk.main()
 
 

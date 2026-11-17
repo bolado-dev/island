@@ -90,3 +90,54 @@ for alias, nombre in QUIERO.items():
     open(os.path.join(dest, alias + ".svg"), "w").write(svg)
     print("  %s.svg" % alias)
 PY2
+
+# --- nombres de emoji en castellano, para el selector ----------------
+#
+# Sin esto el selector busca en ingles, que es lo que trae el fichero
+# del sistema: escribes "fire" y sale el fuego, pero "fuego" no
+# encuentra nada. Con esto van los dos.
+#
+# Tampoco se versiona. Aqui el motivo no es la licencia (CLDR es
+# Unicode-3.0, y permite redistribuir) sino que es un dato derivado de
+# algo que se actualiza solo: regenerarlo es una orden, y tenerlo
+# dentro del repo significa tenerlo desactualizado.
+#
+# Hacen falta los DOS ficheros. annotations tiene los emoji de un
+# codepoint y annotationsDerived los compuestos (la familia de cuatro,
+# las banderas, los oficios): con el primero solo se traduce el 83%.
+#
+# CLDR: https://github.com/unicode-org/cldr (Unicode-3.0)
+echo "Bajando los nombres de emoji en castellano..."
+python3 - "$DIR" <<'PY3'
+import json, os, sys, urllib.request, xml.etree.ElementTree as ET
+BASE = ("https://raw.githubusercontent.com/unicode-org/cldr/main/common/"
+        "%s/es.xml")
+nombres, claves = {}, {}
+for cual in ("annotations", "annotationsDerived"):
+    try:
+        datos = urllib.request.urlopen(BASE % cual, timeout=120).read()
+    except Exception as e:
+        print("  %s: no se pudo bajar (%s)" % (cual, e))
+        continue
+    for a in ET.fromstring(datos).iter("annotation"):
+        cp, txt = a.get("cp"), (a.text or "").strip()
+        if a.get("type") == "tts":
+            nombres[cp] = txt
+        else:
+            claves[cp] = txt
+
+if not nombres:
+    print("  sin datos: el selector buscara en ingles")
+    sys.exit(0)
+
+# Un solo objeto emoji -> [nombre, claves]. Las claves se guardan tal
+# cual vienen, separadas por "|": solo se usan para buscar dentro, asi
+# que partirlas en una lista seria un fichero mas grande sin ninguna
+# ventaja.
+salida = {cp: [n, claves.get(cp, "")] for cp, n in nombres.items()}
+dest = os.path.join(sys.argv[1], "emoji-es.json")
+with open(dest, "w", encoding="utf-8") as f:
+    json.dump(salida, f, ensure_ascii=False, separators=(",", ":"))
+print("  %d nombres en %s (%d KB)"
+      % (len(salida), dest, os.path.getsize(dest) // 1024))
+PY3

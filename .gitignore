@@ -7,3 +7,8 @@ vpn-label
 # Los SVG de Solar se bajan con fetch-icons.sh; no se versionan para no
 # redistribuir un juego de iconos ajeno dentro del repo.
 icons/
+
+# Los nombres de emoji en castellano los baja fetch-icons.sh desde
+# CLDR. Es un dato derivado de algo que se actualiza solo: tenerlo
+# dentro del repo significa tenerlo desactualizado.
+emoji-es.json

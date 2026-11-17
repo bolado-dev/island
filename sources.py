@@ -13,10 +13,12 @@ import time
 import subprocess
 import glob
 import hashlib
+import shutil
 import socket
 import fcntl
 import struct
 import threading
+import unicodedata
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('GdkPixbuf', '2.0')
@@ -1246,3 +1248,248 @@ def _xprop(wid, prop):
     if "=" not in s:
         return ""
     return s.split("=", 1)[1].strip().strip('"')
+
+
+# -------------------------------------------------------------- emoji
+
+# Los nombres de grupo del fichero de Unicode, en castellano. El orden
+# lo decide el fichero (es el de CLDR, pensado justo para paletas de
+# teclado), asi que aqui solo se traduce.
+GRUPOS_ES = {
+    "Smileys & Emotion":  "Caras y emociones",
+    "People & Body":      "Gente y cuerpo",
+    "Animals & Nature":   "Animales y naturaleza",
+    "Food & Drink":       "Comida y bebida",
+    "Travel & Places":    "Viajes y lugares",
+    "Activities":         "Actividades",
+    "Objects":            "Objetos",
+    "Symbols":            "Simbolos",
+    "Flags":              "Banderas",
+}
+
+# Modificadores de tono de piel (U+1F3FB..U+1F3FF).
+_TONOS = frozenset(range(0x1F3FB, 0x1F400))
+
+_emoji_idx = None
+_emoji_lock = threading.Lock()
+
+
+def _sin_tildes(s):
+    return "".join(c for c in unicodedata.normalize("NFD", s.lower())
+                   if not unicodedata.combining(c))
+
+
+def _emoji_es():
+    """Nombres y claves en castellano, si fetch-icons.sh los bajo."""
+    try:
+        with open(C.EMOJI_ES, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _emoji_parse():
+    """Lee emoji-test.txt y devuelve [(char, nombre, grupo, buscable)].
+
+    Se descartan tres cosas, y las tres por el mismo motivo: en una
+    cuadricula estorban mas de lo que aportan.
+
+      - Las variantes que no son "fully-qualified", que son la misma
+        cosa escrita sin el selector de presentacion.
+      - El grupo "Component": tonos de piel y tipos de pelo sueltos, que
+        no son emoji que nadie quiera insertar.
+      - Las variantes de tono de piel. Multiplican por seis cada emoji
+        de persona y dejarian la rejilla llena de la misma mano repetida;
+        pasan de 3947 a 1914.
+    """
+    try:
+        texto = open(C.EMOJI_DATA, encoding="utf-8").read()
+    except OSError:
+        return []
+
+    es = _emoji_es()
+    fuera = []
+    grupo = ""
+    for ln in texto.splitlines():
+        if ln.startswith("# group:"):
+            grupo = ln.split(":", 1)[1].strip()
+            continue
+        if ln.startswith("#") or ";" not in ln:
+            continue
+        cps, resto = ln.split(";", 1)
+        if "fully-qualified" not in resto or grupo == "Component":
+            continue
+        try:
+            puntos = [int(c, 16) for c in cps.split()]
+        except ValueError:
+            continue
+        if any(p in _TONOS for p in puntos):
+            continue
+        ch = "".join(chr(p) for p in puntos)
+
+        # El nombre en ingles va detras del propio emoji y de su version
+        # ("# 😀 E1.0 grinning face").
+        tras = resto.split("#", 1)[-1].strip()
+        en = tras.split(" ", 2)[-1].strip() if " " in tras else tras
+
+        # CLDR guarda las claves SIN los selectores de presentacion.
+        clave = ch.replace("️", "")
+        nom_es, claves_es = es.get(clave, ("", ""))
+        nombre = nom_es or en
+        # Se busca por todo: nombre en castellano, sus sinonimos y el
+        # nombre en ingles. Lo ultimo no es relleno; media jerga de
+        # emoji se dice en ingles, y asi "fire" encuentra el fuego
+        # aunque el nombre que se vea sea "fuego".
+        buscable = _sin_tildes(" ".join((nombre, claves_es, en)))
+        fuera.append((ch, nombre, GRUPOS_ES.get(grupo, grupo), buscable))
+    return fuera
+
+
+def emoji_index():
+    """La lista entera, construida una vez y cacheada.
+
+    Son ~160 ms: 7 de leer el fichero y el resto de preguntarle a la
+    fuente cual sabe dibujar. Se paga en un hilo al arrancar
+    (emoji_precarga) para que abrir el selector no espere nunca.
+    """
+    global _emoji_idx
+    with _emoji_lock:
+        if _emoji_idx is None:
+            import render
+            crudo = _emoji_parse()
+            _emoji_idx = render.emoji_soportados(crudo)
+        return _emoji_idx
+
+
+def emoji_precarga():
+    """Construye el indice en segundo plano, sin estorbar al dibujado."""
+    threading.Thread(target=emoji_index, daemon=True).start()
+
+
+def emoji_buscar(q, limite=200):
+    """Los emoji que casan con lo escrito, mejor primero.
+
+    Sin busqueda no se devuelve la lista en orden de uso, solo los mas
+    usados DELANTE: el orden de Unicode agrupa por tema (caras, gente,
+    animales...) y perderlo por una ordenacion global dejaria la
+    cuadricula sin ninguna estructura que seguir con la vista.
+    """
+    idx = emoji_index()
+    q = _sin_tildes(q.strip())
+    if not q:
+        # Los usados van delante, con su propia etiqueta: asi el salto
+        # entre grupos del teclado (tabulador) los trata como un grupo
+        # mas y la primera pulsacion cae justo al empezar la lista de
+        # verdad. Diez son una fila de la rejilla.
+        usados = sorted((e for e in idx if frec_score("emoji:" + e[0]) > 0),
+                        key=lambda e: -frec_score("emoji:" + e[0]))[:10]
+        recientes = [(e[0], e[1], "Recientes", e[3]) for e in usados]
+        vistos = {e[0] for e in recientes}
+        return recientes + [e for e in idx if e[0] not in vistos]
+
+    out = []
+    for e in idx:
+        texto = e[3]
+        pos = texto.find(q)
+        if pos < 0:
+            continue
+        # Un nombre que EMPIEZA por lo escrito va antes que uno que lo
+        # lleva en medio, y un sinonimo despues de los dos: buscando
+        # "cara" lo que se quiere es la cara, no "mascara".
+        if texto.startswith(q):
+            rango = 0
+        elif pos == 0 or texto[pos - 1] == " ":
+            rango = 1
+        else:
+            rango = 2
+        out.append((rango, -frec_score("emoji:" + e[0]), e))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return [t[2] for t in out[:limite]]
+
+
+# ------------------------------------------------------------- pegado
+
+# Terminales que usan Ctrl+Shift+V en vez de Ctrl+V.
+TERMINALES = frozenset((
+    "kitty", "alacritty", "xterm", "urxvt", "st", "foot",
+    "gnome-terminal", "konsole", "xfce4-terminal", "terminator",
+    "wezterm", "tilix",
+))
+
+
+def _traza_pegar(msg):
+    """Con ISLAND_DEBUG, apunta como fue el pegado.
+
+    El que pega es un hilo sin terminal a la que quejarse, y sin esto no
+    hay forma de saber si un emoji que no aparecio se quedo en el
+    portapapeles, se fue a otra ventana o se intento teclear.
+    """
+    if not os.environ.get("ISLAND_DEBUG"):
+        return
+    try:
+        # El mismo fichero que usa el dictado: el pegado es la ultima
+        # fase de lo que el dictado ya traza, y partirlo en dos ficheros
+        # obligaria a cruzarlos a mano para leer un ciclo entero.
+        carpeta = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
+                               "island-dictado")
+        os.makedirs(carpeta, exist_ok=True)
+        with open(os.path.join(carpeta, "traza.log"), "a") as f:
+            f.write("%.3f pegar: %s\n" % (time.time(), msg))
+    except OSError:
+        pass
+
+
+def pegar(texto, destino=None):
+    """Deja el texto en la ventana que estabas usando.
+
+    **Se pega, no se teclea.** Medido: `xdotool type` pierde las vocales
+    acentuadas ("grabe video" por "grabé vídeo") porque remapea un
+    codigo de tecla por cada caracter que el teclado no tiene, y con el
+    retardo por defecto el servidor X no ha procesado el mapa nuevo
+    cuando llega la pulsacion. Con `--delay 12` sale bien, pero entonces
+    una frase de 300 caracteres tarda casi cuatro segundos.
+
+    Pegar no tiene ninguno de los dos problemas: es instantaneo y el
+    portapapeles no pasa por el mapa de teclado, asi que una ñ, un emoji
+    o una interrogacion de apertura llegan intactos.
+
+    Al portapapeles SIEMPRE, ademas, aunque el pegado falle: lo que
+    acabas de dictar o elegir sigue estando a un Ctrl+V de distancia en
+    vez de haberse perdido.
+
+    Devuelve "escrito", "portapapeles" o "nada".
+    """
+    destino = destino or {}
+    t0 = time.monotonic()
+    if not copy_clipboard(texto):
+        return "nada"
+    if not shutil.which("xdotool"):
+        return "portapapeles"
+    try:
+        if destino.get("id"):
+            # Devolver el foco a donde estaba al empezar: si algo lo
+            # robo mientras hablabas o elegias, el texto va igual a su
+            # sitio.
+            subprocess.run(["xdotool", "windowactivate", "--sync",
+                            destino["id"]], timeout=3)
+        t1 = time.monotonic()
+        atajo = ("ctrl+shift+v" if destino.get("clase") in TERMINALES
+                 else "ctrl+v")
+        subprocess.run(["xdotool", "key", "--clearmodifiers", atajo],
+                       timeout=5, check=True)
+        _traza_pegar("foco %.0f ms, %s %.0f ms, ventana %s (%s)"
+                     % ((t1 - t0) * 1000, atajo,
+                        (time.monotonic() - t1) * 1000,
+                        destino.get("id"), destino.get("clase")))
+        return "escrito"
+    except (OSError, subprocess.SubprocessError) as e:
+        _traza_pegar("fallo en %.0f ms: %r -> se teclea"
+                     % ((time.monotonic() - t0) * 1000, e))
+        # Respaldo: teclearlo. El retardo de 12 ms no es decorativo, es
+        # lo que da tiempo al remapeo; por debajo se comen los acentos.
+        try:
+            subprocess.run(["xdotool", "type", "--clearmodifiers",
+                            "--delay", "12", texto], timeout=30)
+            return "escrito"
+        except (OSError, subprocess.SubprocessError):
+            return "portapapeles"

@@ -4,6 +4,7 @@
 
     dictado.py toggle     # lo que se ata a una tecla en sxhkd
     dictado.py start|stop|cancel
+    dictado.py demo ["frase"]   # sin microfono, para ver como queda
 
 Tres decisiones que explican la forma de esto:
 
@@ -30,7 +31,6 @@ import math
 import time
 import array
 import ctypes
-import shutil
 import signal
 import subprocess
 import threading
@@ -293,61 +293,132 @@ def transcribir(dur=0.0):
 
 # ---------------------------------------------------------- escritura
 
-# Terminales conocidas: en ellas pegar es Ctrl+Shift+V, en todo lo demas
-# Ctrl+V. Es la unica diferencia que hay que saber para pegar bien.
-TERMINALES = {"kitty", "alacritty", "xterm", "urxvt", "st", "foot",
-              "wezterm", "gnome-terminal", "konsole", "terminator", "tilix"}
-
-
 def escribir(texto, destino):
-    """Deja el texto donde estabas. Devuelve como lo hizo.
+    """Deja el texto donde estabas, por el portapapeles.
 
-    **Se pega, no se teclea.** Medido en esta maquina: `xdotool type`
-    pierde las vocales acentuadas ("grabe video" por "grabé vídeo")
-    porque remapea un codigo de tecla por cada caracter que el teclado
-    no tiene y con el retardo por defecto el servidor X no ha procesado
-    el mapa nuevo cuando llega la pulsacion. Con `--delay 12` sale bien,
-    pero entonces una frase de 300 caracteres tarda casi cuatro
-    segundos en aparecer.
-
-    Pegar no tiene ninguno de los dos problemas: es instantaneo y el
-    portapapeles no pasa por el mapa de teclado, asi que una ñ o una
-    interrogacion de apertura llegan intactas.
-
-    Al portapapeles SIEMPRE, ademas, aunque el pegado falle: lo que
-    acabas de dictar sigue estando a un Ctrl+V en vez de haberse
-    perdido.
+    El pegado vive en sources.pegar, no aqui: el selector de emoji
+    necesita exactamente lo mismo (dejar algo en la ventana que tenias
+    delante) y dos copias de esto se habrian separado en cuanto una de
+    las dos aprendiese algo, igual que iba a pasar con la deteccion de
+    las IA. Lo que se queda aqui es la traza, que solo le interesa al
+    dictado.
     """
     t0 = time.monotonic()
-    try:
-        subprocess.run(["xclip", "-selection", "clipboard"],
-                       input=texto.encode(), timeout=3)
-    except Exception:
-        return "portapapeles"
-
-    if not shutil.which("xdotool"):
-        return "portapapeles"
-    try:
-        if destino.get("id"):
-            # Devolver el foco a donde estaba al empezar: si algo lo
-            # robo mientras hablabas, el texto va igual a su sitio.
-            subprocess.run(["xdotool", "windowactivate", "--sync", destino["id"]],
-                           timeout=3)
-        atajo = ("ctrl+shift+v" if destino.get("clase") in TERMINALES
-                 else "ctrl+v")
-        subprocess.run(["xdotool", "key", "--clearmodifiers", atajo],
-                       timeout=5, check=True)
+    como = sources.pegar(texto, destino)
+    if como == "escrito":
         traza("pegar", t0)
-        return "escrito"
-    except Exception:
-        # Respaldo: teclearlo. El retardo de 12 ms no es decorativo, es
-        # lo que da tiempo al remapeo; por debajo se comen los acentos.
-        try:
-            subprocess.run(["xdotool", "type", "--clearmodifiers",
-                            "--delay", "12", texto], timeout=30)
-            return "escrito"
-        except Exception:
-            return "portapapeles"
+    return como
+
+
+# ---------------------------------------------------------------- demo
+
+# Frase por defecto del demo. Larga como para que la onda tenga ritmo y
+# corta como para caber en una linea de la tarjeta.
+DEMO_FRASE = "A\u00f1ade un bot\u00f3n para exportar el informe a CSV"
+
+
+def _silabas(palabra):
+    """Cuantos golpes de voz tiene una palabra, a ojo pero no al azar.
+
+    Grupos de vocales seguidas cuentan como uno (los diptongos se dicen
+    de una vez). No es silabeo correcto —no mira hiatos ni acentos— y no
+    hace falta que lo sea: solo decide cuantas rafagas tiene esa palabra
+    en la onda.
+    """
+    VOCALES = "aeiou\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc"
+    n, dentro = 0, False
+    for c in palabra.lower():
+        v = c in VOCALES
+        if v and not dentro:
+            n += 1
+        dentro = v
+    return max(1, n)
+
+
+def _pcm_demo(frase, semilla=7):
+    """PCM sintetico con la envolvente de alguien diciendo esa frase.
+
+    La gracia es que NO dibuja la onda: fabrica audio y lo deja pasar por
+    el mismo `nivel()` que procesa el microfono. Asi el demo recorre el
+    mismo camino que una grabacion de verdad y la onda no puede acabar
+    pareciendose a algo que el micro nunca produciria.
+
+    Una rafaga por silaba, huecos cortos entre silabas y largos entre
+    palabras, y una pausa en cada coma. El ruido va con semilla fija: un
+    demo que sale distinto cada vez no sirve para comparar dos versiones
+    ni para volver a grabar el mismo GIF.
+    """
+    import random
+    rnd = random.Random(semilla)
+
+    # Niveles en RMS de muestra de 16 bits. Salen de la escala de
+    # nivel(): -18 dBFS cae en 0,8 de la onda, que es una voz normal a
+    # medio metro, y -48 en 0,05, que es el fondo de una habitacion.
+    RMS_FUERTE, RMS_FLOJA, RMS_FONDO = 4100.0, 2300.0, 130.0
+
+    tramos = []          # (segundos, rms objetivo)
+    for palabra in frase.split():
+        for i in range(_silabas(palabra)):
+            # La primera silaba de cada palabra suena algo mas fuerte:
+            # sin esa diferencia la onda sale como un peine regular, que
+            # es justo lo que no parece una voz.
+            base = RMS_FUERTE if i == 0 else RMS_FLOJA
+            tramos.append((rnd.uniform(0.11, 0.19),
+                           base * rnd.uniform(0.75, 1.15)))
+            tramos.append((rnd.uniform(0.02, 0.05), RMS_FONDO))
+        tramos.append((rnd.uniform(0.06, 0.12), RMS_FONDO))
+        if palabra.endswith(","):
+            tramos.append((0.22, RMS_FONDO))
+
+    pcm = array.array("h")
+    for segundos, rms in tramos:
+        n = int(segundos * RATE)
+        # Ruido uniforme: su RMS es la amplitud entre raiz de tres, y
+        # como nivel() solo mide RMS, no hace falta nada mas elaborado.
+        amp = rms * math.sqrt(3.0)
+        for _ in range(n):
+            pcm.append(int(max(-32768, min(32767, rnd.uniform(-amp, amp)))))
+    return pcm
+
+
+def demo(frase=None):
+    """Simula un dictado entero sin abrir el microfono.
+
+    Para ver como queda la tarjeta y para grabar el GIF del README. No
+    graba, no transcribe y no pega nada: solo manda a la isla los mismos
+    eventos que mandaria un dictado de verdad, al mismo ritmo.
+
+    La ventana de destino SI es real, asi que si lo lanzas desde una
+    terminal con una IA dentro sale su logo, igual que al dictar.
+    """
+    frase = frase or DEMO_FRASE
+    destino = sources.ventana_enfocada()
+    pcm = _pcm_demo(frase)
+    paso = int(CHUNK * RATE)
+
+    enviar(state="oyendo", value=0.0, app=destino["app"],
+           ia=destino.get("ia", ""))
+    t0 = time.monotonic()
+    for i in range(0, len(pcm), paso):
+        enviar(state="oyendo", value=nivel(pcm[i:i + paso].tobytes()),
+               app=destino["app"], ia=destino.get("ia", ""))
+        # Al reloj y no acumulando esperas: enviar tarda lo suyo, y
+        # sumando sleeps fijos la onda se iria quedando atras de lo que
+        # tardaria el audio de verdad.
+        siguiente = (i // paso + 1) * CHUNK
+        espera = t0 + siguiente - time.monotonic()
+        if espera > 0:
+            time.sleep(espera)
+
+    dur = len(pcm) / float(RATE)
+    enviar(state="transcribiendo", app=destino["app"],
+           ia=destino.get("ia", ""))
+    # Whisper tarda aproximadamente la cuarta parte de lo que has
+    # hablado (medido: 11 s de audio en 2,9), asi que el demo espera eso
+    # y no un numero redondo.
+    time.sleep(dur / 4.0)
+    enviar(state="listo", text=frase, app=destino["app"],
+           ia=destino.get("ia", ""), title="escrito")
 
 
 # ------------------------------------------------------------- mandos
@@ -428,6 +499,8 @@ if __name__ == "__main__":
         stop()
     elif accion == "cancel":
         cancel()
+    elif accion == "demo":
+        demo(sys.argv[2] if len(sys.argv) > 2 else None)
     else:
         print(__doc__)
         sys.exit(2)
