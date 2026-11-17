@@ -42,7 +42,6 @@ import sources
 RUN = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island-dictado")
 PIDF = os.path.join(RUN, "pid")
 WAV = os.path.join(RUN, "audio.wav")
-FIFO = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island.fifo")
 
 # Con ISLAND_DEBUG se escribe una linea por fase con el tiempo que
 # costo. Es la unica forma de saber donde se va el retardo entre soltar
@@ -71,19 +70,9 @@ TECHO_DB = -10.0             # a partir de aqui la barra esta llena
 # --------------------------------------------------------------- isla
 
 def enviar(**campos):
-    """Escribe el evento en el FIFO de la isla, sin pasar por
-    `island-send`: durante la grabacion esto se llama doce veces por
-    segundo, y lanzar un proceso de Python por cada nivel costaria mas
-    que grabar."""
-    if not os.path.exists(FIFO):
-        return
+    """Un evento a la isla, siempre de tipo 'dictado'."""
     campos.setdefault("kind", "dictado")
-    try:
-        fd = os.open(FIFO, os.O_WRONLY | os.O_NONBLOCK)
-        os.write(fd, (json.dumps(campos) + "\n").encode())
-        os.close(fd)
-    except OSError:
-        pass                 # la isla no esta escuchando: no es motivo para fallar
+    sources.enviar_evento(**campos)
 
 
 # ------------------------------------------------------------ teclado

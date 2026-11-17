@@ -669,6 +669,35 @@ class Micro(object):
 
 # --------------------------------------------------------------- fifo
 
+# El canal por el que entra todo lo que no se puede sondear: dunst, el
+# dictado, las capturas. Un FIFO y no un socket porque los que escriben
+# son scripts de una linea, y "echo > fifo" es algo que sabe hacer
+# cualquiera.
+FIFO = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island.fifo")
+
+
+def enviar_evento(**campos):
+    """Mete un evento en el FIFO de la isla.
+
+    Lo usan los ayudantes que corren como proceso suelto (el dictado y
+    las capturas) sin pasar por `island-send`: durante una grabacion
+    esto se llama doce veces por segundo, y lanzar un interprete de
+    Python por cada nivel costaria mas que grabar.
+
+    Si la isla no esta escuchando, se descarta en silencio. Que el
+    escritorio no tenga barra no es motivo para que falle una captura.
+    """
+    if not os.path.exists(FIFO):
+        return False
+    try:
+        fd = os.open(FIFO, os.O_WRONLY | os.O_NONBLOCK)
+        os.write(fd, (json.dumps(campos) + "\n").encode())
+        os.close(fd)
+        return True
+    except OSError:
+        return False
+
+
 class Fifo(object):
     """Entrada de eventos externos: una linea JSON por evento.
 
@@ -1215,6 +1244,41 @@ def copy_clipboard(texto):
         return True
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+# ------------------------------------------------------------ miniaturas
+
+_thumb_cache = {}
+
+
+def load_thumb(ruta, alto):
+    """Miniatura escalada a ese alto, cacheada por fichero y fecha.
+
+    La escala la hace GdkPixbuf una vez y no cairo en cada fotograma: a
+    sesenta por segundo, volver a muestrear la misma imagen es trabajo
+    tirado y encima con peor filtro.
+    """
+    if not ruta:
+        return None
+    try:
+        mt = os.path.getmtime(ruta)
+    except OSError:
+        return None
+    clave = (ruta, mt, alto)
+    if clave in _thumb_cache:
+        return _thumb_cache[clave]
+    try:
+        pb = GdkPixbuf.Pixbuf.new_from_file(ruta)
+        if pb.get_height() != alto:
+            escala = alto / float(pb.get_height())
+            pb = pb.scale_simple(max(1, int(pb.get_width() * escala)), alto,
+                                 GdkPixbuf.InterpType.BILINEAR)
+    except Exception:
+        return None
+    # Una sola: la isla ensena la ultima captura, no un album.
+    _thumb_cache.clear()
+    _thumb_cache[clave] = pb
+    return pb
 
 
 # ------------------------------------------------------------ ventanas

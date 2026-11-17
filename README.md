@@ -179,6 +179,53 @@ El pegado es el mismo código que el del dictado (`sources.pegar`): las dos
 cosas hacen exactamente lo mismo, dejar algo en la ventana que tenías
 delante, y dos copias se habrían separado en cuanto una aprendiese algo.
 
+<p align="center">
+  <img src="docs/capture.png" alt="Tarjeta de captura: la miniatura de lo recién capturado, el tamaño en píxeles y tres botones redondos de abrir, carpeta y borrar" width="620">
+</p>
+
+**Capturas de pantalla.** `Print` selecciona una región, `ctrl + Print` coge la
+pantalla entera y `alt + Print` la ventana enfocada. Baja el notch con **la
+miniatura de verdad** de lo que acabas de capturar, el tamaño, y tres botones:
+abrirla, abrir la carpeta o borrarla. Queda en `~/ScreenShots` y copiada al
+portapapeles, porque una captura casi siempre es para pegarla en otro sitio.
+
+Borrar ahí mismo es la razón de ser de la tarjeta: la mitad de las capturas se
+hacen para mirarlas diez segundos, y si no tienes dónde tirarlas se quedan en
+la carpeta para siempre.
+
+**El notch se aparta antes de disparar.** Encadenar dos capturas es lo normal,
+y la tarjeta de la primera sigue a la vista cuando disparas la segunda: saldría
+en la foto. Se le pide que se repliegue y se espera a que lo haga. Eso obligó a
+arreglar algo que venía de antes: **el repliegue solo se programaba al salir el
+ratón o al cambiar de escritorio**, nunca al caducar lo que se estaba
+enseñando, así que el notch se quedaba abajo hasta que lo rozabas.
+
+**La miniatura la hace el ayudante, no la isla.** Medido aquí: sacarla del PNG
+completo son 34 ms y sacarla de la miniatura ya hecha, 1. Lo que importa no es
+el factor treinta, es que esos 34 ms caerían en el hilo de GTK --dos fotogramas
+perdidos- justo en la animación de entrada de la tarjeta.
+
+Y la miniatura no es un `Image` con otra foto dentro: ese es cuadrado, porque un
+icono de aplicación y una carátula lo son. Una captura no, y meterla en un
+cuadrado la deformaría o recortaría justo lo que te hizo capturarla. Manda el
+alto, el ancho sale de la proporción y hay un tope por si capturas algo muy
+alargado.
+
+**El subtítulo tiene ancho fijo**, el del texto más largo que puede salir ahí.
+Al señalar un botón, donde ponía el tamaño pone lo que hace ese botón --así la
+etiqueta vive en un sitio y no en tres chips que ensancharían la tarjeta-, y sin
+reservar el hueco la tarjeta se encogía al señalar: lo que se movía era justo el
+botón que estabas a punto de pulsar.
+
+La selección congela la pantalla (`scrot --freeze`), que es lo que permite
+capturar un menú abierto sin que se cierre al mover el ratón. Conviene saber
+cómo lo hace: con `XGrabServer`, así que mientras eliges **ningún otro cliente
+de X puede dibujar**. De ahí el tope de 60 segundos, que no es decorativo: si
+scrot se colgase, el escritorio entero se quedaría congelado detrás.
+
+Anotar encima (flechas, texto, difuminado) sigue siendo cosa de flameshot, en
+`super + shift + s`. La isla no se mete ahí.
+
 **Reproducción.** Lo que suene por MPRIS aparece con carátula y controles.
 
 <p align="center">
@@ -395,9 +442,10 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-rsvg-2.0
 
 Opcionales, según lo que quieras que funcione: `playerctl` (reproducción),
 `nmcli` (wifi), `wpctl` de PipeWire (volumen), `dunst` (notificaciones),
-`xclip` (copiar desde la calculadora), y `unicode-data` más
+`xclip` (copiar desde la calculadora), `unicode-data` más
 `fonts-noto-color-emoji` para el selector de emoji, que sin la lista del
-sistema te dice que falta en vez de abrirse vacío.
+sistema te dice que falta en vez de abrirse vacío, y `scrot` 2.0 para las
+capturas (el `--freeze` de la selección es suyo).
 
 Para el dictado hacen falta además `pw-record` (PipeWire), `xclip`, `xdotool`
 (sin él el texto se queda en el portapapeles en vez de escribirse solo) y
@@ -433,6 +481,21 @@ Y el del selector de emoji, que no necesita nada más:
 ```
 super + period
 	~/.config/island/island-send panel --target emoji
+```
+
+Y los de las capturas. El modificador va **delante**: escrito al revés
+(`@Print + ctrl`) sxhkd no casa el acorde, se queda con el `Print` pelado y
+`ctrl` y `alt` acaban haciendo los tres lo mismo.
+
+```
+@Print
+	~/.config/island/captura.py select
+
+ctrl + @Print
+	~/.config/island/captura.py screen
+
+alt + @Print
+	~/.config/island/captura.py window
 ```
 
 Ojo si vienes de la configuración de ejemplo de bspwm: ahí `super + .` es uno

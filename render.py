@@ -166,6 +166,57 @@ class Image(object):
         cr.restore()
 
 
+class Thumb(object):
+    """Miniatura de proporcion libre, con las esquinas redondeadas.
+
+    Image no vale: es cuadrada, porque un icono de aplicacion y una
+    caratula lo son. Una captura de pantalla no, y meterla en un
+    cuadrado la deformaria o recortaria justo la parte que te hizo
+    capturarla.
+
+    El alto manda y el ancho sale de la proporcion del fichero, asi que
+    todas las tarjetas miden lo mismo de alto aunque capture una
+    pantalla apaisada o una ventana estrecha.
+    """
+    def __init__(self, pixbuf, alto, radius=10, tag=None):
+        self.pb, self.alto, self.radius, self.tag = pixbuf, alto, radius, tag
+        prop = (pixbuf.get_width() / float(pixbuf.get_height())
+                if pixbuf is not None and pixbuf.get_height() else 1.0)
+        # Tope de proporcion: una captura de una ventana muy alargada
+        # (una terminal a pantalla completa) daria una miniatura de 400
+        # px de ancho y la tarjeta no cabria en el notch.
+        self.ancho = max(alto * 0.6, min(alto * 2.4, alto * prop))
+
+    def size(self, cr):
+        return self.ancho, self.alto
+
+    def draw(self, cr, x, cy, a):
+        if self.tag:
+            _record(self.tag, x, cy, self.ancho, self.alto, pad=0)
+        y = cy - self.alto / 2.0
+        cr.save()
+        capsule(cr, x, y, self.ancho, self.alto, self.radius)
+        cr.clip()
+        if self.pb is not None:
+            # El pixbuf llega escalado al ALTO; el sobrante de ancho se
+            # recorta por el centro, que es donde esta lo que importa.
+            pw = self.pb.get_width()
+            Gdk.cairo_set_source_pixbuf(cr, self.pb,
+                                        x - (pw - self.ancho) / 2.0, y)
+            cr.paint_with_alpha(a)
+        else:
+            cr.set_source_rgba(*T.SURF_2, a)
+            cr.paint()
+        cr.restore()
+        # Un filo tenue: sobre el negro de la isla, una captura oscura
+        # se quedaria sin borde y pareceria un agujero.
+        capsule(cr, x + 0.5, y + 0.5, self.ancho - 1, self.alto - 1,
+                self.radius)
+        cr.set_source_rgba(1, 1, 1, 0.14 * a)
+        cr.set_line_width(1.0)
+        cr.stroke()
+
+
 class Dot(object):
     """Punto de actividad. Es el recurso que usa iOS para 'hay algo en
     marcha en segundo plano'."""

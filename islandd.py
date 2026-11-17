@@ -16,6 +16,7 @@ import locale
 import calendar
 import textwrap
 import threading
+import shlex
 from collections import deque
 import datetime
 import gi
@@ -32,7 +33,6 @@ import sources
 import controls
 import config as C
 
-FIFO = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island.fifo")
 
 # Sin esto, strftime usa la locale C y la fecha saldria "Sun 15 Nov".
 # Con LANG=es_ES.UTF-8 queda "dom 15 nov".
@@ -90,7 +90,7 @@ class Island(Gtk.Window):
         self.connect("button-release-event", self.on_release)
         self.connect("motion-notify-event", self.on_motion)
         self.connect("leave-notify-event", self.on_leave)
-        self.connect("enter-notify-event", lambda *a: self._mostrar())
+        self.connect("enter-notify-event", self.on_enter)
         self.connect("key-press-event", self.on_key)
         self.connect("realize", lambda *a: self.update_input_region())
 
@@ -177,6 +177,7 @@ class Island(Gtk.Window):
         self.caret_on = True
         self._blink_id = None
         self._seat = None          # captura activa (puntero/teclado)
+        self._dentro = False       # el raton, encima de la isla
         self._grab_guard = None
         # Mas rapidos que los de la isla (0.38-0.50): el hover tiene que
         # sentirse inmediato, no "animado". Amortiguacion alta para que
@@ -192,7 +193,7 @@ class Island(Gtk.Window):
         self.sp_mic = Spring(0.0, response=0.34, damping=0.70)
         self.sp_rec = Spring(0.0, response=0.34, damping=0.70)
         self._cursor_ptr = None
-        self.fifo = sources.Fifo(FIFO, self.on_event)
+        self.fifo = sources.Fifo(sources.FIFO, self.on_event)
 
         # Un unico temporizador de 1 s para reloj y enchufe: dos
         # separados despertaban el proceso el doble de veces para hacer
@@ -386,6 +387,11 @@ class Island(Gtk.Window):
             return
         if kind == "dismiss":
             self.activities.pop(ev.get("target", ""), None)
+            if not self.activities:
+                # Quien manda un dismiss quiere el notch fuera YA, no
+                # dentro de 700 ms: es lo que hace captura.py antes de
+                # disparar para no fotografiarse a si misma.
+                self._programar_ocultado(0)
             self.refresh()
             return
         if kind == "dictado":
@@ -442,6 +448,9 @@ class Island(Gtk.Window):
             "notify":     (20, 5.0, "card"),
             "music":      (10, None, "card"),
             "power":      (40, 4.0, "pillx"),
+            # Mas que una notificacion y mas duradera: la acabas de
+            # pedir tu, y tiene botones que hay que llegar a pulsar.
+            "captura":    (35, 6.0, "card"),
         }.get(kind, (20, 5.0, "card"))
         prio, ttl, mode = spec
         if ev.get("ttl") is not None:
@@ -784,6 +793,59 @@ class Island(Gtk.Window):
                 else:
                     fila.add(R.Text(destino, T.F_SUB, T.DIM))
             return fila
+
+        if k == "captura":
+            pb = sources.load_thumb(d.get("thumb"), T.CAP_THUMB_H)
+            # Sin miniatura (un PNG que GdkPixbuf no supo abrir) se
+            # ensena el glifo de camara: la tarjeta sigue sirviendo,
+            # porque lo que de verdad hace falta son los botones.
+            cabeza = (R.Thumb(pb, T.CAP_THUMB_H, tag="cap:abrir")
+                      if pb is not None
+                      else self._ico("camera", 34, T.ACCENT, T.G_CAMERA))
+
+            # El subtitulo dice el tamano y si quedo copiada, pero al
+            # senalar un boton dice lo que hace ese boton. Es el mismo
+            # criterio que el menu de apagado: la etiqueta vive en un
+            # solo sitio y no en tres chips que ensancharian la tarjeta.
+            cur = self.hover or ""
+            base = " \u00b7 ".join(x for x in (d.get("text"),
+                                               d.get("hint")) if x)
+            sub = next((etq for etq, _g, acc in T.CAP_ACTS
+                        if cur == "cap:" + acc), base)
+
+            # El hueco del subtitulo es FIJO, el del texto mas ancho de
+            # los que pueden salir ahi. Si no, al senalar un boton la
+            # tarjeta se encoge, y lo que se mueve es justo el boton que
+            # estas a punto de pulsar.
+            txt = R.Text(sub, T.F_SMALL, T.DIM)
+            ancho_sub = max([R.Text(t, T.F_SMALL, T.DIM).size(cr)[0]
+                             for t in [base] + [a[0] for a in T.CAP_ACTS]])
+            linea_sub = R.Row([txt,
+                               R.Gap(max(0, ancho_sub - txt.size(cr)[0]))])
+
+            botones = R.Row()
+            for i, (_etq, glifo, acc) in enumerate(T.CAP_ACTS):
+                if i:
+                    botones.add(R.Gap(8))
+                tag = "cap:" + acc
+                botones.add(R.Chip(
+                    "", T.F_SMALL, T.FG,
+                    T.ACCENT if cur == tag else T.SURF_1, tag=tag,
+                    icon=self._ico(glifo, 26,
+                                   T.FG if cur == tag else T.DIM),
+                    padx=14, pady=10))
+
+            return R.Row().add(
+                cabeza, R.Gap(18),
+                R.Stack([
+                    # "Captura" y no el nombre del fichero: son 23
+                    # digitos que se comen la tarjeta y no dicen nada
+                    # que no diga ya la miniatura. Donde esta se
+                    # averigua con el boton de la carpeta.
+                    R.Row().add(R.Text("Captura", T.F_TITLE, T.FG)),
+                    linea_sub,
+                ], gap=5),
+                R.Gap(24), botones)
 
         if k == "music":
             art = d.get("art")
@@ -1264,6 +1326,32 @@ class Island(Gtk.Window):
 
         sources.frec_bump(carga)
         self._spawn(carga)
+
+    def _captura_accion(self, acc):
+        """Abrir, ver la carpeta o borrar la captura que se ensena."""
+        act = self.activities.get("captura")
+        if act is None:
+            return
+        ruta = act.data.get("path") or ""
+        self.activities.pop("captura", None)
+        if acc == "abrir" and ruta:
+            self._spawn("%s %s" % (C.CMD_VISOR, shlex.quote(ruta)))
+        elif acc == "carpeta":
+            self._spawn("%s %s" % (C.CMD_CARPETA,
+                                   shlex.quote(C.CAPTURA_DIR)))
+        elif acc == "borrar":
+            try:
+                os.unlink(ruta)
+                aviso = "Borrada"
+            except OSError:
+                aviso = "No se pudo borrar"
+            # Se dice que se borro. Un fichero que desaparece sin mas
+            # deja la duda de si llego a borrarse, y encima la copia
+            # del portapapeles sigue ahi.
+            self.on_event({"kind": "notify", "app": "Captura",
+                           "body": aviso})
+            return
+        self.refresh()
 
     def _spawn(self, cmd):
         try:
@@ -1757,6 +1845,14 @@ class Island(Gtk.Window):
 
         if self.activities:
             self._mostrar()
+        elif T.AUTOHIDE and not self.oculto and self._hide_id is None:
+            # Se acabo lo que habia que ensenar. Hasta ahora el repliegue
+            # solo se programaba al salir el raton o al cambiar de
+            # escritorio, asi que al caducar una notificacion el notch se
+            # quedaba abajo hasta que lo rozabas. Se nota sobre todo
+            # encadenando capturas: la tarjeta de la anterior salia en la
+            # foto siguiente.
+            self._programar_ocultado()
         if ((T.WS_ANIM and not self.sp_wsx.settled)
                 or (T.WS_POP and not self.sp_pop.settled)):
             self.ensure_tick()
@@ -1930,7 +2026,12 @@ class Island(Gtk.Window):
         aviso.
         """
         self._hide_id = None
-        if not T.AUTOHIDE or self.activities or self.hover is not None:
+        if (not T.AUTOHIDE or self.activities or self.hover is not None
+                or self._dentro):
+            # Con el raton encima no se repliega aunque ya no quede nada
+            # que ensenar: lo estas mirando tu. Antes bastaba con mirar
+            # 'hover', que solo se pone sobre una zona pulsable, asi que
+            # el puntero en una parte muerta del notch no contaba.
             return False
         self.oculto = True
         self.sp_y.set(-(T.H_COMPACT - T.PEEK))
@@ -2126,6 +2227,8 @@ class Island(Gtk.Window):
         elif tag.startswith("emo:"):
             self.emo["sel"] = int(tag[4:])
             self._emoji_sel()
+        elif tag.startswith("cap:"):
+            self._captura_accion(tag[4:])
         elif tag == "vol-slider":
             self._drag = "vol-slider"
             self._slide(ev.x, rect)
@@ -2171,7 +2274,7 @@ class Island(Gtk.Window):
                         "vol-mixer", "clock")
                 or tag == "dnd" or tag.startswith("ws")
                 or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
-                                   "ds:", "media:", "emo:")))
+                                   "ds:", "media:", "emo:", "cap:")))
 
     def _set_cursor(self, pointer):
         if pointer == self._cursor_ptr:
@@ -2211,7 +2314,17 @@ class Island(Gtk.Window):
             # asi que el pie dice siempre el nombre de lo que hay debajo
             # del puntero.
             self.emo["sel"] = int(tag[4:])
-        if "panel" in self.activities:
+        if tag is not None and tag.startswith("cap:"):
+            # Senalar un boton aplaza el cierre. Si no, mover el raton
+            # hasta "Borrar" podia gastar los ultimos segundos de la
+            # tarjeta y te la encontrabas desapareciendo bajo el dedo.
+            act = self.activities.get("captura")
+            if act is not None and act.expires is not None:
+                act.expires = max(act.expires, time.monotonic() + 3.0)
+                self._schedule_expiry()
+        if "panel" in self.activities or "captura" in self.activities:
+            # La tarjeta de la captura tambien depende del hover: el
+            # boton senalado se tine y el subtitulo dice lo que hace.
             self.refresh()
         self.ensure_tick()
 
@@ -2237,8 +2350,14 @@ class Island(Gtk.Window):
             self._set_cursor(tag == "vol-slider")
         return False
 
+    def on_enter(self, widget, ev):
+        self._dentro = True
+        self._mostrar()
+        return False
+
     def on_leave(self, widget, ev):
         # Al salir del raton, ni realce ni cursor de mano.
+        self._dentro = False
         self._set_hover(None, None)
         self._set_cursor(False)
         self._programar_ocultado()

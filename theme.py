@@ -296,3 +296,18 @@ EMO_ANCHO = EMO_COLS * EMO_CELDA
 # familias de cuatro incluidas. De ahi que la rejilla pueda ser
 # uniforme sin medir celda por celda.
 F_EMOJI   = ("Noto Color Emoji", "normal", 30)
+
+# ------------------------------------------------------------ capturas
+# Alto de la miniatura en la tarjeta. H_CARD son 112, asi que 72 deja 20
+# de aire arriba y abajo, el mismo que el icono de una notificacion.
+CAP_THUMB_H = 72
+
+G_CAMERA  = ""
+# (etiqueta, glifo, accion). La etiqueta se ensena al senalar el boton,
+# como en el menu de apagado: tres chips con texto harian una tarjeta
+# mas ancha que el propio notch en reposo.
+CAP_ACTS = [
+    ("Abrir",   "", "abrir"),
+    ("Carpeta", "", "carpeta"),
+    ("Borrar",  "", "borrar"),
+]

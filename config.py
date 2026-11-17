@@ -129,3 +129,22 @@ EMOJI_DATA = "/usr/share/unicode/emoji/emoji-test.txt"
 # "fire". Los genera fetch-icons.sh desde CLDR; si falta el fichero se
 # busca en ingles, que es lo que trae emoji-test.txt.
 EMOJI_ES = os.path.expanduser("~/.config/island/emoji-es.json")
+
+# ------------------------------------------------------------ capturas
+# Capturas de pantalla (captura.py). Donde van los ficheros y como se
+# llaman. El formato es el de strftime; con segundos a proposito, que
+# dos capturas seguidas dentro del mismo minuto no se pisen.
+CAPTURA_DIR = os.path.expanduser("~/ScreenShots")
+CAPTURA_FMT = "%Y-%m-%d_%H-%M-%S.png"
+
+# Con que se abre una captura al pulsar "Abrir", y con que su carpeta.
+# xdg-open respeta lo que tengas asociado; si prefieres un visor
+# concreto, ponlo aqui.
+CMD_VISOR    = "xdg-open"
+CMD_CARPETA  = "xdg-open"
+
+# Segundos que se espera, tras pedirle a la isla que se repliegue, antes
+# de disparar la captura. Si no, una tarjeta todavia a la vista (la de
+# la captura ANTERIOR, que es el caso frecuente) sale en la foto. Medido
+# en esta maquina: el repliegue tarda 0,35 s.
+CAPTURA_ESPERA = 0.40
