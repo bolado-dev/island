@@ -29,6 +29,7 @@ import json
 import math
 import time
 import array
+import ctypes
 import shutil
 import signal
 import subprocess
@@ -82,6 +83,56 @@ def enviar(**campos):
         os.close(fd)
     except OSError:
         pass                 # la isla no esta escuchando: no es motivo para fallar
+
+
+# ------------------------------------------------------------ teclado
+
+_X = {"dpy": None, "lib": None}
+
+
+def _x11():
+    """Conexion minima con el servidor X, por ctypes.
+
+    Sin python-xlib y sin lanzar `xinput` doce veces por segundo: es la
+    misma idea que leer la IP por ioctl en vez de llamar a `ip`.
+    """
+    if _X["dpy"] is None:
+        try:
+            lib = ctypes.CDLL("libX11.so.6")
+            lib.XOpenDisplay.restype = ctypes.c_void_p
+            dpy = lib.XOpenDisplay(None)
+            _X["lib"], _X["dpy"] = lib, (dpy or False)
+        except OSError:
+            _X["dpy"] = False
+    return _X["lib"], _X["dpy"]
+
+
+def tecla_pulsada(nombre):
+    """True si esa tecla esta fisicamente pulsada ahora mismo.
+
+    Existe porque sxhkd no puede contestar a esto. El atajo de SOLTADO
+    (`@super + v`) solo casa si la v se suelta ANTES que super, y al
+    levantar la mano del teclado lo normal es lo contrario: entonces no
+    lo ve nadie y el dictado se queda grabando para siempre. Atar
+    tambien el soltado de super no vale: agarrar un modificador rompe la
+    propia combinacion, comprobado, y dejaba de funcionar hasta el caso
+    que antes iba bien.
+
+    Preguntarle al servidor X por la tecla es la verdad, y no depende
+    del orden en que se suelte nada.
+    """
+    lib, dpy = _x11()
+    if not dpy:
+        return False
+    sym = lib.XStringToKeysym(nombre.encode())
+    if not sym:
+        return False
+    kc = lib.XKeysymToKeycode(ctypes.c_void_p(dpy), sym)
+    if not kc:
+        return False
+    mapa = (ctypes.c_char * 32)()
+    lib.XQueryKeymap(ctypes.c_void_p(dpy), mapa)
+    return bool(mapa[kc >> 3][0] & (1 << (kc & 7)))
 
 
 # ------------------------------------------------------------- ventana
@@ -140,6 +191,11 @@ def grabar(destino):
     signal.signal(signal.SIGUSR1, lambda *_: parar.set())
     signal.signal(signal.SIGTERM, lambda *_: parar.set())
 
+    # Push-to-talk solo si la tecla esta pulsada AHORA. Si se llego aqui
+    # por el interruptor (super+shift+v) esta suelta, y vigilarla
+    # pararia la grabacion en el primer parpadeo.
+    vigila = bool(C.DICT_TECLA) and tecla_pulsada(C.DICT_TECLA)
+
     enviar(state="oyendo", value=0.0, app=destino["app"],
            ia=destino.get("ia", ""))
 
@@ -147,6 +203,8 @@ def grabar(destino):
     t0 = time.monotonic()
     while not parar.is_set():
         if parar.wait(CHUNK):
+            break
+        if vigila and not tecla_pulsada(C.DICT_TECLA):
             break
         if rec.poll() is not None:             # pw-record se murio solo
             break

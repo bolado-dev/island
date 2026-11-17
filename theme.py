@@ -273,5 +273,10 @@ DICT_BAR_MIN = 4      # alto en silencio: la onda no desaparece del todo
 DICT_COLOR   = RED    # grabando. El rojo es la convencion universal
 DICT_WORK    = ACCENT # transcribiendo
 DICT_OK      = GREEN  # texto listo
-# Texto transcrito que cabe en la tarjeta antes de recortar.
-DICT_MAXTXT  = 78
+# El texto transcrito se reparte en varias lineas. Tres es el tope por
+# una razon de forma: a partir de ahi la tarjeta deja de ser un aviso y
+# se convierte en un documento, y encima el texto YA esta pegado en su
+# sitio, que es donde se lee de verdad. Lo que sobra se corta con
+# puntos suspensivos.
+DICT_LINEAS  = 3
+DICT_COLS    = 58     # caracteres por linea antes de partir

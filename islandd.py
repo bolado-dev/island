@@ -14,6 +14,7 @@ import time
 import math
 import locale
 import calendar
+import textwrap
 from collections import deque
 import datetime
 import gi
@@ -392,7 +393,11 @@ class Island(Gtk.Window):
                 self.ensure_tick()
                 return
 
-            self.activities["dictado"] = Activity("dictado", 60, ttl, ev, "card")
+            # "panel" no es un panel de verdad: es el unico modo cuyo
+            # alto se ajusta al contenido, y el resultado puede ocupar
+            # una linea o tres. Los demas estados son de alto fijo.
+            modo = "panel" if estado == "listo" else "card"
+            self.activities["dictado"] = Activity("dictado", 60, ttl, ev, modo)
             self.refresh()
             return
 
@@ -657,26 +662,24 @@ class Island(Gtk.Window):
                     R.Gap(18),
                     R.Text("Escuchando", T.F_TITLE, T.FG))
             elif estado == "transcribiendo":
-                # Misma forma que "escuchando" a proposito: el icono, la
-                # onda y el texto siguen en su sitio, asi que el cambio
-                # se lee como que esto sigue siendo lo mismo en otra
-                # fase, y no como que una tarjeta ha sustituido a otra.
+                # Sin microfono y sin onda: aqui ya no hay señal que
+                # enseñar, el micro esta cerrado. Lo unico que esta
+                # pasando es una espera, y para eso basta el latido de
+                # los puntos. La onda todavia se ve un momento, pero
+                # cayendo en la tarjeta que se desvanece por debajo.
                 fila = R.Row().add(
-                    self._ico("mic", 30, T.DICT_WORK, T.G_MIC),
-                    R.Gap(16),
-                    R.Wave(self.dict_shown, T.DICT_WORK, T.DICT_BARS,
-                           T.DICT_BAR_W, T.DICT_BAR_GAP,
-                           T.DICT_BAR_H, T.DICT_BAR_MIN),
-                    R.Gap(18),
                     R.Text("Transcribiendo", T.F_TITLE, T.FG),
                     R.Gap(16),
                     R.Pulse(self.anim, T.DICT_WORK))
             elif estado == "listo":
+                lineas = textwrap.wrap(d.get("text") or "", T.DICT_COLS) or [""]
+                if len(lineas) > T.DICT_LINEAS:
+                    lineas = lineas[:T.DICT_LINEAS]
+                    lineas[-1] = lineas[-1].rstrip() + "\u2026"
                 fila = R.Row().add(
                     self._ico("check", 26, T.DICT_OK, T.G_CHECK),
                     R.Gap(14),
-                    R.Text(self._clip(d.get("text") or "", T.DICT_MAXTXT),
-                           T.F_BODY, T.FG))
+                    R.Stack([R.Text(l, T.F_BODY, T.FG) for l in lineas], gap=7))
             else:
                 # Un fallo tiene que distinguirse de "no dijiste nada":
                 # el mensaje lo manda quien lo sabe, que es el ayudante.

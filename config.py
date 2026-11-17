@@ -76,3 +76,9 @@ DICT_THREADS = 10
 # Tope de grabacion. Si algo se queda colgado, que no grabe toda la
 # noche: son 120 s de audio y de disco por cada pulsacion olvidada.
 DICT_MAX_S   = 120
+# Tecla del push-to-talk, como la llama X (ver `xmodmap -pke`). El
+# ayudante la vigila mientras graba y para en cuanto se suelta, pase lo
+# que pase con los modificadores: el atajo de soltado de sxhkd solo casa
+# si se suelta la tecla ANTES que super, y al levantar la mano suele ser
+# al reves. Vacia = no vigilar, solo el atajo.
+DICT_TECLA = "v"

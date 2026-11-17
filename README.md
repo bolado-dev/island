@@ -143,11 +143,29 @@ que delata a una barra de sonido mal hecha.
 **Sube rápido y baja despacio.** Grabando, la onda tiene que seguir a la voz
 sin retraso o deja de ser la señal. Al soltar la tecla pasa lo contrario: lo
 que quieres es *ver* cómo se cierra el micrófono, y a la velocidad de subida
-eso dura 200 ms, o sea nada. Cayendo tarda 400. Y no se cambia de tarjeta: el
-icono, la onda y el texto se quedan donde estaban mientras la onda baja, el
-color pasa de rojo a azul y «Escuchando» se funde en «Transcribiendo», así que
-soltar se lee como otra fase de lo mismo y no como que algo ha sustituido a
-otra cosa.
+eso dura 200 ms, o sea nada. Cayendo tarda 400, y se ve caer dentro de la
+tarjeta que se está desvaneciendo, porque el fundido cruzado sigue dibujando
+el contenido anterior mientras entra el nuevo.
+
+Transcribiendo no hay micrófono ni onda: el micro está cerrado y ahí ya no hay
+señal que enseñar. Lo único que pasa es una espera de la que nadie sabe cuánto
+va a durar, y para eso basta el latido de tres puntos. Una barra de progreso
+mentiría, porque whisper no informa de su avance.
+
+**Parar no se lo puede pedir a sxhkd.** El atajo de soltado (`@super + v`)
+solo casa si sueltas la `v` **antes** que super, y al levantar la mano del
+teclado lo normal es lo contrario: entonces el soltado no lo ve nadie y el
+dictado se queda grabando hasta el tope de dos minutos. Atar también el
+soltado de super no vale, y no es teoría: `@super_l` rompe la propia
+combinación, y con ella puesta dejaba de funcionar hasta el caso que antes iba
+bien.
+
+Así que mientras graba se le pregunta al servidor X si la tecla sigue pulsada,
+por `ctypes` contra libX11 (`XQueryKeymap`), sin python-xlib y sin lanzar
+`xinput` doce veces por segundo. Es la misma idea que leer la IP por `ioctl`
+en vez de llamar a `ip`. Y como solo se vigila si la tecla estaba pulsada al
+empezar, el interruptor de `super + shift + v` sigue funcionando: ahí está
+suelta, y vigilarla pararía la grabación en el primer parpadeo.
 
 **La ventana de destino se mira al empezar, no al terminar.** Mientras hablas
 el foco puede cambiar solo —una notificación, un gesto del ratón— y el texto
@@ -176,6 +194,12 @@ línea ahí y un SVG en `icons/`; si falta el SVG se enseña el nombre y ya. Los
 logos salen de [simple-icons](https://simpleicons.org) y se pintan como
 máscara, así que el fichero no guarda el color: el blanco lo pone el tema. El
 texto se escribe igual en cualquier ventana, con IA o sin ella.
+
+**El resultado se enseña hasta en tres líneas.** Tres es el tope por una
+razón de forma: a partir de ahí la tarjeta deja de ser un aviso y se convierte
+en un documento, y además el texto ya está pegado donde lo vas a leer de
+verdad. Lo que sobra se corta con puntos suspensivos. Es el único estado que
+cambia de alto según el contenido.
 
 **El texto se pega, no se teclea.** Medido aquí: `xdotool type` se come las
 vocales acentuadas ("grabe video" por "grabé vídeo"), porque remapea un código
