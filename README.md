@@ -223,8 +223,13 @@ cómo lo hace: con `XGrabServer`, así que mientras eliges **ningún otro client
 de X puede dibujar**. De ahí el tope de 60 segundos, que no es decorativo: si
 scrot se colgase, el escritorio entero se quedaría congelado detrás.
 
-Anotar encima (flechas, texto, difuminado) sigue siendo cosa de flameshot, en
-`super + shift + s`. La isla no se mete ahí.
+`super + shift + s` hace lo mismo que `Print` a secas. Es un atajo de más a
+propósito: es el que está en los dedos de tanto usarlo, y una tecla que ya sabes
+pulsar vale más que una coherencia bonita.
+
+Lo que la isla no hace es **anotar** encima de la captura: flechas, texto,
+difuminar una contraseña. Para eso está flameshot, que no se desinstala por
+esto; solo deja de tener atajo. Si lo quieres, átalo a otra tecla.
 
 **Reproducción.** Lo que suene por MPRIS aparece con carátula y controles.
 
@@ -496,6 +501,9 @@ ctrl + @Print
 
 alt + @Print
 	~/.config/island/captura.py window
+
+super + shift + s
+	~/.config/island/captura.py select
 ```
 
 Ojo si vienes de la configuración de ejemplo de bspwm: ahí `super + .` es uno
