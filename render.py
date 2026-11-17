@@ -71,6 +71,53 @@ def font_desc(spec):
     return d
 
 
+# Tamano OPTICO de un glifo, cacheado por (glifo, fuente).
+#
+# Pedir "28 px" a Pango no da 28 px de dibujo: da una caja de 36 de alto
+# donde el glifo ocupa lo que ocupe. Medido en Iosevka Nerd Font a 28:
+# la campana pinta 29 px de tinta, el rayo y el power 27, el altavoz y
+# el wifi 23, y la bateria 21. Un 38% de diferencia entre el mayor y el
+# menor, puestos en fila y al mismo color: eso es lo que hace que una
+# barra de iconos se vea desordenada aunque los numeros del codigo sean
+# todos iguales.
+#
+# Asi que el tamano se pide en ALTO DE TINTA y aqui se traduce al tamano
+# de fuente que lo consigue.
+_optico_cache = {}
+_optico_cr = None
+TINTA = 0.80          # alto de tinta objetivo, como fraccion del px pedido
+
+
+def _ctx_medida():
+    global _optico_cr
+    if _optico_cr is None:
+        _optico_cr = cairo.Context(
+            cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1))
+    return _optico_cr
+
+
+def font_optico(spec, glifo, objetivo=None):
+    """La fuente con la que ESE glifo mide `objetivo` px de tinta.
+
+    Se mide una vez por glifo y tamano. Si el glifo no tiene tinta (un
+    espacio, un cuadro vacio) se devuelve el spec tal cual: no hay nada
+    que normalizar y dividir por cero seria peor.
+    """
+    familia, peso, px = spec
+    objetivo = objetivo or px * TINTA
+    clave = (glifo, spec, round(objetivo, 1))
+    if clave in _optico_cache:
+        return _optico_cache[clave]
+    l = PangoCairo.create_layout(_ctx_medida())
+    l.set_font_description(font_desc(spec))
+    l.set_text(glifo, -1)
+    ink, _log = l.get_pixel_extents()
+    nuevo = spec if ink.height <= 0 else (
+        familia, peso, max(6.0, px * objetivo / float(ink.height)))
+    _optico_cache[clave] = nuevo
+    return nuevo
+
+
 def capsule(cr, x, y, w, h, r=None):
     """Rectangulo redondeado exacto.
 

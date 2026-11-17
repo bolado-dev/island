@@ -95,8 +95,28 @@ FILLET    = 16
 PAD_PILL  = 20        # pildora compacta y expansiones horizontales
 PAD_CARD  = 30        # tarjetas (notificacion, musica)
 PAD_PANEL = 34        # paneles con controles
-GAP_GROUP = 26        # separacion ENTRE grupos
-GAP_ITEM  = 14        # separacion DENTRO de un grupo
+# Escala de separacion: DOS valores y ninguno a ojo. Lo que habia antes
+# eran 14 y 26, y por el camino se colaban huecos sueltos de 6, 7 y 8
+# dentro de los grupos compuestos. Con esa diferencia tan corta --menos
+# del doble- y esa irregularidad, los grupos no se leian como grupos:
+# la barra parecia una lista de cosas en fila.
+#
+# 8 y 28 es 3,5 veces, que si se ve. Dentro de un grupo todo va a 8,
+# incluido el numero que acompana a un icono; entre grupos, 28.
+GAP_GROUP = 28        # separacion ENTRE grupos
+GAP_ITEM  = 8         # separacion DENTRO de un grupo
+
+
+def gap_item(px=None):
+    """Hueco dentro de un grupo, proporcional a lo que separa.
+
+    Un hueco fijo en pixeles no vale cuando a un lado hay un reloj de 35
+    px y al otro una fecha de 22: se ve al medirlo, 8 px dejaban el
+    "23:51" pegado al "mar 17 nov" mientras que entre iconos de 22 esos
+    mismos 8 estaban bien. La proporcion (0,36 del alto) es lo que hace
+    que la regla sea UNA y no dos numeros elegidos a ojo.
+    """
+    return GAP_ITEM if px is None else max(GAP_ITEM, int(round(px * 0.36)))
 GAP_ROW   = 20        # separacion vertical entre filas de un panel
 
 # Ancho de la columna del indicador en las listas (el punto de "red

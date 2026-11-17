@@ -544,14 +544,18 @@ class Island(Gtk.Window):
         con una constante: las decenas de llamadas repartidas por los
         paneles no saben si detras hay un SVG o un glifo.
         """
-        font = (T.F_SMALL if px <= 23
-                else T.F_ICON if px <= 30 else T.F_ICON_L)
         # 'nombre' puede ser un nombre interno ("wifi") o ya un glifo
         # suelto: algunos mapas de theme guardan el caracter directamente.
         # Aceptar ambos evita tener que mantenerlos sincronizados.
         glifo = T.ICON_GLYPH.get(nombre)
         if glifo is None:
             glifo = respaldo or (nombre if len(nombre) <= 2 else "")
+        # El tamano se pide en px y se convierte a ALTO DE TINTA, que es
+        # lo unico que se ve. Antes habia tres cubos (22, 28, 34) y pedir
+        # 26 dibujaba 28; y dentro de cada cubo cada glifo pintaba lo que
+        # le daba la gana: de 21 a 29 px al mismo tamano nominal.
+        font = (R.font_optico((T.F_ICON[0], T.F_ICON[1], px), glifo)
+                if glifo else T.F_ICON)
         if T.USAR_SOLAR:
             return R.Icon(nombre, px, color, glifo, font, tag)
         return R.Text(glifo, font, color, tag=tag)
@@ -562,10 +566,12 @@ class Island(Gtk.Window):
         # Reloj y fecha forman un grupo pulsable que abre el calendario.
         row.add(R.Row([
             R.Text(time.strftime("%H:%M"), T.F_CLOCK, T.FG),
-            # La fecha acompana al reloj: mismo grupo, por eso GAP_ITEM y
+            # La fecha acompana al reloj: mismo grupo, por eso gap_item y
             # no GAP_GROUP. Mas pequena y apagada para que el reloj siga
-            # siendo el ancla visual del notch.
-            R.Gap(T.GAP_ITEM),
+            # siendo el ancla visual del notch. El hueco se pide a la
+            # escala CON el tamano del reloj: entre dos iconos de 22 son
+            # 8 px, detras de un reloj de 35 son 13.
+            R.Gap(T.gap_item(T.F_CLOCK[2])),
             R.Text(time.strftime("%a %d %b"), T.F_SMALL, T.DIM),
         ], tag="clock"))
         row.add(R.Gap(T.GAP_GROUP))
@@ -607,7 +613,7 @@ class Island(Gtk.Window):
             logo = self.foco.ia or "claude"
             row.add(R.Row([R.Alfa(R.Row([
                 R.Icon("ia-" + logo, 22, T.FG, T.G_MIC, T.F_SMALL),
-                R.Gap(8),
+                R.Gap(T.GAP_ITEM),
                 R.Text("Dictado", T.F_SMALL, T.DIM),
             ]), self.sp_mic)], tag="dictado"))
             row.add(R.Gap(T.GAP_GROUP))
@@ -622,7 +628,7 @@ class Island(Gtk.Window):
         if self.sp_rec.value > 0.01 or self.micro.abierto:
             row.add(R.Row([R.Alfa(R.Row([
                 R.Dot(7, T.RED),
-                R.Gap(7),
+                R.Gap(T.GAP_ITEM),
                 self._ico("mic", 22, T.RED, T.G_MIC),
             ]), self.sp_rec)], tag="micro"))
             row.add(R.Gap(T.GAP_GROUP))
@@ -632,7 +638,7 @@ class Island(Gtk.Window):
         # estado que casi siempre esta apagado seria ruido fijo.
         if self.dnd:
             row.add(R.Row([self._ico("bell-off", 28, T.ORANGE)], tag="dnd"))
-            row.add(R.Gap(T.GAP_ITEM))
+            row.add(R.Gap(T.GAP_GROUP))
         # Cada icono de estado va envuelto en una fila con etiqueta: es
         # lo que convierte el dibujo en una zona pulsable, porque las
         # etiquetas se registran al dibujar con su posicion real.
@@ -647,13 +653,19 @@ class Island(Gtk.Window):
                       T.FG if si.wifi else T.DIM2, T.G_WIFI)], tag="net"))
         row.add(R.Gap(T.GAP_ITEM))
         if si.charging:
-            bat = [self._ico("bolt", 28, T.GREEN, T.G_BOLT), R.Gap(6),
-                   R.Text("%d%%" % si.battery, T.F_TITLE, T.GREEN)]
+            bat = [self._ico("bolt", 28, T.GREEN, T.G_BOLT),
+                   R.Gap(T.GAP_ITEM),
+                   R.Text("%d%%" % si.battery, T.F_SMALL, T.GREEN)]
         else:
             lvl = min(4, max(0, si.battery * 5 // 100))
             col = T.RED if si.battery <= 15 else T.FG
-            bat = [self._ico("bat-%d" % lvl, 28, col, T.G_BAT[lvl]), R.Gap(6),
-                   R.Text("%d%%" % si.battery, T.F_TITLE, col)]
+            bat = [self._ico("bat-%d" % lvl, 28, col, T.G_BAT[lvl]),
+                   R.Gap(T.GAP_ITEM),
+                   R.Text("%d%%" % si.battery, T.F_SMALL, col)]
+        # El porcentaje va al tamano de la fecha, no al del reloj. En la
+        # base hay DOS escalones de texto: el reloj, que es el ancla, y
+        # todo lo demas. A 27 px semibold el "66%" pesaba casi como la
+        # hora y la barra tenia dos centros de atencion.
         row.add(R.Row(bat, tag="bat"))
         row.add(R.Gap(T.GAP_GROUP))
         row.add(self._ico("power", 28, T.DIM, T.G_POWER, tag="power"))

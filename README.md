@@ -456,6 +456,31 @@ redondeadas abajo, y los enlaces cóncavos donde el notch encuentra el borde.
 Esos filetes son la diferencia entre parecer tallado en el panel y parecer una
 pieza pegada encima.
 
+**Retícula.** Dos cosas que no se ven en el código y sí en la pantalla.
+
+La primera: pedirle «28 px» a Pango no da 28 píxeles de dibujo, da una caja de
+36 donde el glifo ocupa lo que ocupe. Medido en Iosevka Nerd Font a ese tamaño,
+la campana pinta 29 píxeles de tinta, el rayo y el botón de apagado 27, el
+altavoz y el wifi 23, y la batería 21. Un 38% de diferencia entre el mayor y el
+menor, puestos en fila y al mismo color: eso es lo que hace que una barra de
+iconos se vea descuadrada aunque los números del código sean idénticos. Así que
+el tamaño se pide en **alto de tinta** y `render.font_optico` lo traduce al
+tamaño de fuente que lo consigue, una vez por glifo. La dispersión baja del 38%
+al 4%.
+
+La segunda: la separación tiene **dos valores**, 8 dentro de un grupo y 28
+entre grupos. Antes eran 14 y 26 --menos del doble, así que los grupos no se
+leían como grupos- y por el camino se colaban huecos sueltos de 6 y de 7. Con
+una excepción que también salió de medir: un hueco fijo en píxeles no vale
+cuando a un lado hay un reloj de 35 píxeles y al otro una fecha de 22, porque
+los mismos 8 que están bien entre dos iconos dejan el `23:51` pegado al `mar 17
+nov`. El hueco interior se pide con el tamaño de lo que separa y sale de una
+proporción, no de elegir otro número a ojo.
+
+Y en la base hay **dos escalones de texto**: el reloj, que es el ancla, y todo
+lo demás. El porcentaje de batería estaba en el de en medio y pesaba casi como
+la hora, así que la barra tenía dos centros de atención.
+
 **Eventos.** Un FIFO en `$XDG_RUNTIME_DIR`, una línea JSON por evento, y un
 cliente (`island-send`) para escribir en él. Todo lo que no sea estado del
 sistema entra por ahí: la regla de dunst, los scripts de volumen y brillo, y
