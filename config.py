@@ -81,7 +81,10 @@ DICT_MAX_S   = 120
 # que pase con los modificadores: el atajo de soltado de sxhkd solo casa
 # si se suelta la tecla ANTES que super, y al levantar la mano suele ser
 # al reves. Vacia = no vigilar, solo el atajo.
-DICT_TECLA = "v"
+# En minusculas y con el nombre que le da X: "space", no "Space". Con
+# la mayuscula XStringToKeysym devuelve 0, no se vigila nada y el
+# dictado se queda grabando hasta el tope.
+DICT_TECLA = "space"
 
 # Pista que se le da a whisper antes de transcribir. No es una orden,
 # es contexto: el modelo lo toma como "lo que se venia diciendo", asi

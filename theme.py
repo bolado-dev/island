@@ -311,3 +311,10 @@ CAP_ACTS = [
     ("Carpeta", "", "carpeta"),
     ("Borrar",  "", "borrar"),
 ]
+
+# ------------------------------------------------- historial de copiado
+# Filas a la vista en el panel de super + v. Seis caben de sobra en
+# WIN_H y son las que de verdad se recuerdan; para mas abajo esta
+# escribir dos letras y filtrar.
+PP_FILAS = 6
+G_CLIP   = ""

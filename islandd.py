@@ -159,6 +159,7 @@ class Island(Gtk.Window):
                              damping=T.SP_POP_DAMP)
         self.launch = None        # estado del lanzador de aplicaciones
         self.emo = None           # estado del selector de emoji
+        self.port = None          # estado del historial del portapapeles
         self.emo_destino = {}     # ventana donde ira el emoji
         self.apps = []            # indice de .desktop (se llena en diferido)
         self.wins = []            # ventanas abiertas (se lee al abrir)
@@ -1015,6 +1016,9 @@ class Island(Gtk.Window):
         if which == "emoji":
             return self.build_emoji(cr)
 
+        if which == "portapapeles":
+            return self.build_port(cr)
+
         if which == "powermenu":
             cur = self.hover or ""
             lbl_w = max(R.Text(a[0], T.F_SUB, T.FG).size(cr)[0]
@@ -1580,6 +1584,130 @@ class Island(Gtk.Window):
                                else "No se pudo copiar %s" % ch})
         return False
 
+    # ------------------------------------------ historial del portapapeles
+
+    def _start_port(self):
+        # La ventana de destino, ANTES de capturar el teclado: es donde
+        # va a caer lo que elijas, igual que en el selector de emoji.
+        self.emo_destino = sources.ventana_enfocada()
+        self.port = {"q": "", "sel": 0, "res": list(self.portapapeles.items)}
+        self.activities["panel"] = Activity(
+            "panel", 50, None, {"which": "portapapeles"}, "panel")
+
+        def fallo():
+            self.port = None
+            self.activities.pop("panel", None)
+            self.on_event({"kind": "notify", "app": "Portapapeles",
+                           "body": "No se pudo capturar el teclado"})
+            self.refresh()
+
+        self._grab_retry(Gdk.SeatCapabilities.KEYBOARD
+                         | Gdk.SeatCapabilities.ALL_POINTING, fallo)
+        self._blink_id = GLib.timeout_add(530, self._blink)
+        self.refresh()
+
+    def build_port(self, cr):
+        st = self.port or {"q": "", "sel": 0, "res": []}
+        res = st["res"]
+        ANCHO = 560
+
+        cab = R.Row().add(
+            self._ico("clip", 28, T.DIM, T.G_CLIP),
+            R.Gap(T.GAP_ITEM),
+            R.Field(ANCHO - 28 - T.GAP_ITEM, st["q"], T.F_SUB, T.FG,
+                    caret=self.caret_on, secret=False))
+        filas = [cab]
+
+        if not res:
+            # Dos vacios distintos, y la diferencia importa: uno se
+            # arregla copiando algo y el otro borrando lo que buscas.
+            filas.append(R.Row().add(
+                R.Gap(T.GAP_ITEM),
+                R.Text("Nada copiado todav\u00eda" if not st["q"]
+                       else "Nada que case con eso", T.F_SUB, T.DIM2)))
+            return R.Stack(filas, gap=T.GAP_ROW)
+
+        sel = min(st["sel"], len(res) - 1)
+        for i, txt in enumerate(res[:T.PP_FILAS]):
+            una = " ".join(txt.split())
+            # El numero de linea no es decoracion: dice cuantas cosas
+            # hay detras de lo que se ve y de un vistazo sabes si lo que
+            # buscas esta a dos flechas o a diez.
+            num = R.Text("%d" % (i + 1), T.F_SMALL, T.DIM2)
+            cuerpo = R.Text(self._clip(una, 58), T.F_SMALL,
+                            T.FG if i == sel else T.DIM)
+            fila = R.Row([R.Gap(4), num, R.Gap(14), cuerpo])
+            filas.append(R.Box(fila, bg=T.SURF_1 if i == sel else None,
+                               w=ANCHO, padx=12, pady=8, tag="pp:%d" % i))
+
+        filas.append(R.Row().add(R.Text(
+            "\u2191\u2193 navegar \u00b7 \u23ce pegar \u00b7 esc cerrar",
+            T.F_SMALL, T.DIM2)))
+        return R.Stack(filas, gap=8)
+
+    def _key_port(self, ev):
+        st = self.port
+        kv = ev.keyval
+        if kv == Gdk.KEY_Escape:
+            self._close_panel()
+            self.refresh()
+            return True
+        if kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self._port_sel()
+            return True
+        if kv in (Gdk.KEY_Down, Gdk.KEY_Tab):
+            st["sel"] = min(len(st["res"]) - 1, st["sel"] + 1)
+        elif kv in (Gdk.KEY_Up, Gdk.KEY_ISO_Left_Tab):
+            st["sel"] = max(0, st["sel"] - 1)
+        elif kv == Gdk.KEY_BackSpace:
+            st["q"] = st["q"][:-1]
+            st["res"] = self._port_res(st["q"])
+            st["sel"] = 0
+        else:
+            ch = Gdk.keyval_to_unicode(kv)
+            if ch < 32:
+                return True
+            st["q"] += chr(ch)
+            st["res"] = self._port_res(st["q"])
+            st["sel"] = 0
+        self.refresh()
+        return True
+
+    def _port_res(self, q):
+        if not q.strip():
+            return list(self.portapapeles.items)
+        return self.portapapeles.busca(q, T.PP_FILAS)
+
+    def _port_sel(self):
+        st = self.port
+        if not st or not st["res"]:
+            return
+        txt = st["res"][min(st["sel"], len(st["res"]) - 1)]
+        destino = self.emo_destino
+        self._close_panel()
+        self.refresh()
+
+        # Igual que al insertar un emoji: la captura del teclado tiene
+        # que estar soltada DE VERDAD antes de mandar el Ctrl+V, o se lo
+        # come la propia isla. sync espera a que X lo haya hecho.
+        gd = self.get_display()
+        if gd is not None:
+            gd.sync()
+
+        def trabajo():
+            como = sources.pegar(txt, destino)
+            GLib.idle_add(self._tras_port, txt, como)
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _tras_port(self, txt, como):
+        if como == "escrito":
+            return False
+        self.on_event({"kind": "notify", "app": "Portapapeles",
+                       "body": self._clip(" ".join(txt.split()), 60)
+                               if como == "portapapeles"
+                               else "No se pudo pegar"})
+        return False
+
     def open_panel(self, which):
         act = self.activities.get("panel")
         if act is not None and act.data.get("which") == which:
@@ -1588,6 +1716,8 @@ class Island(Gtk.Window):
             self._start_launcher()                 # necesita teclado
         elif which == "emoji":
             self._start_emoji()                    # tambien
+        elif which == "portapapeles":
+            self._start_port()                     # y este
         else:
             # volumen y energia caben en una fila: pildora alta en vez
             # de panel, que reserva padding vertical de tarjeta.
@@ -1700,6 +1830,7 @@ class Island(Gtk.Window):
         self.pw = None
         self.launch = None
         self.emo = None
+        self.port = None
         b = getattr(self, "_blink_id", None)
         if b:
             GLib.source_remove(b)
@@ -1742,6 +1873,8 @@ class Island(Gtk.Window):
             return self._key_launcher(ev)
         if self.emo is not None:
             return self._key_emoji(ev)
+        if self.port is not None:
+            return self._key_port(ev)
         if self.pw is None:
             return False
         kv = ev.keyval
@@ -2229,6 +2362,9 @@ class Island(Gtk.Window):
             self._emoji_sel()
         elif tag.startswith("cap:"):
             self._captura_accion(tag[4:])
+        elif tag.startswith("pp:"):
+            self.port["sel"] = int(tag[3:])
+            self._port_sel()
         elif tag == "vol-slider":
             self._drag = "vol-slider"
             self._slide(ev.x, rect)
@@ -2274,7 +2410,7 @@ class Island(Gtk.Window):
                         "vol-mixer", "clock")
                 or tag == "dnd" or tag.startswith("ws")
                 or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
-                                   "ds:", "media:", "emo:", "cap:")))
+                                   "ds:", "media:", "emo:", "cap:", "pp:")))
 
     def _set_cursor(self, pointer):
         if pointer == self._cursor_ptr:
@@ -2309,6 +2445,8 @@ class Island(Gtk.Window):
             # Apuntar una fila la selecciona, para que raton y teclado
             # compartan una unica nocion de "el que se va a lanzar".
             self.launch["sel"] = int(tag[4:])
+        if tag is not None and tag.startswith("pp:") and self.port:
+            self.port["sel"] = int(tag[3:])
         if tag is not None and tag.startswith("emo:") and self.emo:
             # Lo mismo en la rejilla: apuntar una casilla la selecciona,
             # asi que el pie dice siempre el nombre de lo que hay debajo

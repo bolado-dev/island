@@ -124,7 +124,18 @@ El historial del portapapeles solo aparece **cuando escribes algo**: sin
 búsqueda, lo que quieres es saltar a una ventana o abrir un programa, que es a
 lo que se abre el lanzador el 95% de las veces. Y no toca el disco a
 propósito: por el portapapeles pasan contraseñas, y lo que no se guarda no se
-filtra. Es además la única pieza de la isla que sondea, porque X no avisa de
+filtra.
+
+**Y tiene panel propio en `super + v`**, como el de Windows: la lista de lo
+último copiado, numerada, con las flechas para moverte y `⏎` para pegarlo **en
+la ventana que tenías delante** --no en el portapapeles para que lo pegues tú-.
+Escribir filtra. Es el mismo historial que ve el lanzador, así que no hay dos
+listas que puedan discrepar.
+
+Lo que no sale ahí son las imágenes: el historial es de texto. Después de una
+captura, el portapapeles tiene un PNG y `xclip -o` devuelve bytes que no son
+UTF-8; el sondeo se come esa excepción y sigue, así que la imagen se ignora sin
+ensuciar la lista. Es además la única pieza de la isla que sondea, porque X no avisa de
 un cambio de selección a quien no se registra con XFixes y eso significaba
 meter un segundo bucle de eventos de X dentro de una aplicación GTK. Medido,
 la alternativa tonta sale a 0,1% de un núcleo: un `xclip -o` son 3 ms, uno
@@ -292,9 +303,9 @@ avisarse a sí mismo.
   <img src="docs/dictado.gif" alt="Mientras hablas el notch enseña un micrófono rojo y la onda del sonido junto a la palabra Escuchando; al soltar pasa a Transcribiendo y luego a la frase transcrita con una marca verde y el logo de la IA a la que va" width="760">
 </p>
 
-**Dictado por voz.** Mantén `super + v`, habla y suéltala: la isla se
+**Dictado por voz.** Mantén `super + espacio`, habla y suéltalo: la isla se
 despliega con la onda del micrófono, transcribe en local y escribe el texto
-donde estabas. `super + shift + v` es el mismo dictado como interruptor, para
+donde estabas. `super + shift + espacio` es el mismo dictado como interruptor, para
 hablar largo sin tener la mano en la tecla.
 
 Tres cosas que no son obvias:
@@ -319,7 +330,7 @@ señal que enseñar. Lo único que pasa es una espera de la que nadie sabe cuán
 va a durar, y para eso basta el latido de tres puntos. Una barra de progreso
 mentiría, porque whisper no informa de su avance.
 
-**Parar no se lo puede pedir a sxhkd.** El atajo de soltado (`@super + v`)
+**Parar no se lo puede pedir a sxhkd.** El atajo de soltado (`@super + space`)
 solo casa si sueltas la `v` **antes** que super, y al levantar la mano del
 teclado lo normal es lo contrario: entonces el soltado no lo ve nadie y el
 dictado se queda grabando hasta el tope de dos minutos. Atar también el
@@ -331,7 +342,7 @@ Así que mientras graba se le pregunta al servidor X si la tecla sigue pulsada,
 por `ctypes` contra libX11 (`XQueryKeymap`), sin python-xlib y sin lanzar
 `xinput` doce veces por segundo. Es la misma idea que leer la IP por `ioctl`
 en vez de llamar a `ip`. Y como solo se vigila si la tecla estaba pulsada al
-empezar, el interruptor de `super + shift + v` sigue funcionando: ahí está
+empezar, el interruptor de `super + shift + espacio` sigue funcionando: ahí está
 suelta, y vigilarla pararía la grabación en el primer parpadeo.
 
 **La ventana de destino se mira al empezar, no al terminar.** Mientras hablas
@@ -500,18 +511,27 @@ Y el atajo, en tu `sxhkdrc`. El soltado es un atajo distinto (`@`), que es lo
 que lo convierte en push-to-talk de verdad:
 
 ```
-super + v
+super + space
 	~/.config/island/dictado.py start
 
-@super + v
+@super + space
 	~/.config/island/dictado.py stop
 ```
 
-Y el del selector de emoji, que no necesita nada más:
+Si cambias de tecla, cámbiala también en `DICT_TECLA` (`config.py`): es la que
+el ayudante le pregunta a X para parar al soltarla. Va con el nombre que le da
+X y en minúsculas --`space`, no `Space`-, porque con la mayúscula
+`XStringToKeysym` devuelve 0, no se vigila nada y la grabación se queda hasta
+el tope.
+
+Y los que van a un panel de la isla, que no necesitan nada más:
 
 ```
 super + period
 	~/.config/island/island-send panel --target emoji
+
+super + v
+	~/.config/island/island-send panel --target portapapeles
 ```
 
 Y los de las capturas. El modificador va **delante**: escrito al revés
