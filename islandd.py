@@ -115,7 +115,7 @@ class Island(Gtk.Window):
         # de desplegarse.
         self.sp_w = Spring(600, response=0.42, damping=0.80)
         self.sp_h = Spring(T.H_COMPACT, response=0.50, damping=0.90)
-        self.sp_fade = Spring(1.0, response=0.26, damping=1.0)
+        self.sp_fade = Spring(1.0, response=0.26, damping=1.0, escala=0.01)
         self._tick_id = None
         self._exp_id = None
         self._last = time.monotonic()
@@ -213,7 +213,7 @@ class Island(Gtk.Window):
         self.sp_hy = Spring(0, response=0.20, damping=0.95)
         self.sp_hw = Spring(0, response=0.20, damping=0.95)
         self.sp_hh = Spring(0, response=0.20, damping=0.95)
-        self.sp_ha = Spring(0, response=0.16, damping=1.0)
+        self.sp_ha = Spring(0, response=0.16, damping=1.0, escala=0.01)
         # Entrada del indicador de dictado disponible. Con rebote (0.7):
         # es un aviso de que algo se ha encendido, y un pequeño remate
         # al llegar lo hace notar sin tener que parpadear para siempre.
@@ -223,10 +223,10 @@ class Island(Gtk.Window):
         # Rapido y sin rebote: esto no es una entrada en escena, es un
         # mando respondiendo, y un rebote ahi se lee como imprecision.
         self.sp_nivel = Spring(0.0, response=T.SP_NIVEL_RESP,
-                               damping=T.SP_NIVEL_DAMP)
+                               damping=T.SP_NIVEL_DAMP, escala=0.01)
         self._nivel_de = None      # de que es el nivel que lleva dentro
-        self.sp_mic = Spring(0.0, response=0.34, damping=0.70)
-        self.sp_rec = Spring(0.0, response=0.34, damping=0.70)
+        self.sp_mic = Spring(0.0, response=0.34, damping=0.70, escala=0.01)
+        self.sp_rec = Spring(0.0, response=0.34, damping=0.70, escala=0.01)
         self._cursor_ptr = None
         self.fifo = sources.Fifo(sources.FIFO, self.on_event)
 
@@ -744,12 +744,15 @@ class Island(Gtk.Window):
             # La barra va por el muelle y el numero por el valor real:
             # el numero es un dato y tiene que ser exacto desde el
             # primer fotograma; la barra es un gesto y puede tardar.
+            # El icono, en hueco fijo: el altavoz cambia de dibujo con
+            # el nivel (17 px el silenciado, 32 el de tres ondas) y con
+            # eso la isla se reajustaba al cruzar cada umbral.
             return R.Row().add(
-                self._ico(nom, 34, col, T.G_SUN),
+                R.Cell(self._ico(nom, 34, col, T.G_SUN), 34, 34),
                 R.Gap(18),
                 R.Bar(260, 10, self.sp_nivel, col),
                 R.Gap(16),
-                R.Text("%d%%" % pct, T.F_TITLE, T.FG))
+                self._pct(cr, pct, T.F_MONO_BIG, T.FG))
 
         if k == "power":
             on = d.get("charging")
@@ -982,11 +985,12 @@ class Island(Gtk.Window):
             # sobraban: eran una tercera fila entera para una accion que
             # ya cabe en el propio icono.
             return R.Row().add(
-                R.Row([self._ico(nom, 34, col, T.G_MUTE)], tag="vol-mute"),
+                R.Row([R.Cell(self._ico(nom, 34, col, T.G_MUTE), 34, 34)],
+                      tag="vol-mute"),
                 R.Gap(22),
                 R.Slider(420, 12, self.sp_nivel, col, tag="vol-slider"),
                 R.Gap(20),
-                R.Text("%d%%" % pct, T.F_TITLE, T.FG))
+                self._pct(cr, pct, T.F_MONO_BIG, T.FG))
 
         if which == "battery":
             if not controls.epp_disponible():
@@ -2652,6 +2656,22 @@ class Island(Gtk.Window):
             cr.restore()
 
         cr.reset_clip()
+
+    @staticmethod
+    def _pct(cr, valor, fuente, color):
+        """El porcentaje en un hueco de ancho FIJO y alineado a la
+        derecha.
+
+        Dos problemas de una vez. El ancho: "5%" mide 40 px y "100%" 68,
+        asi que la isla se reajustaba en CADA paso de volumen --crecia y
+        encogia mientras subes la rueda-. Y la posicion: con una fuente
+        proporcional, el simbolo de porcentaje bailaba al cambiar las
+        cifras. Monoespaciada y pegado a la derecha, el % no se mueve ni
+        un pixel y el hueco siempre mide lo que mide "100%".
+        """
+        txt = R.Text("%d%%" % valor, fuente, color)
+        hueco = R.Text("100%", fuente, color).size(cr)[0] - txt.size(cr)[0]
+        return R.Row([R.Gap(max(0, hueco)), txt])
 
     def _mayusculas(self):
         """Si Bloq Mayus esta puesto AHORA. Se pregunta a GDK en vez de

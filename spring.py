@@ -12,10 +12,19 @@ import math
 class Spring:
     # response: periodo natural en segundos (cuanto tarda en "responder")
     # damping:  1.0 = critico (sin rebote); <1 rebota al llegar
-    def __init__(self, value=0.0, response=0.38, damping=0.82):
+    # escala: cuanto vale UNA unidad de este muelle en pixeles. Los que
+    # mueven geometria van en pixeles y valen 1; los que mueven una
+    # fraccion de 0 a 1 (fundidos, niveles) valen ~100, asi que se les
+    # pasa escala=0.01. Sin eso, el umbral de "ya ha llegado" --pensado
+    # en pixeles- se cumple casi al salir: un muelle de 0 a 1 se daba
+    # por asentado con un 25% del recorrido aun por hacer y pegaba el
+    # ultimo tramo de un salto. De ahi que bajarle la amortiguacion no
+    # cambiara nada: nunca llegaba a la parte donde rebota.
+    def __init__(self, value=0.0, response=0.38, damping=0.82, escala=1.0):
         self.value = float(value)
         self.target = float(value)
         self.vel = 0.0
+        self.escala = float(escala)
         self.configure(response, damping)
 
     def configure(self, response, damping):
@@ -45,8 +54,10 @@ class Spring:
 
     @property
     def settled(self):
-        # Umbrales en px: por debajo de un cuarto de pixel no se ve.
-        return abs(self.value - self.target) < 0.25 and abs(self.vel) < 0.5
+        # Umbrales en px, convertidos a las unidades de este muelle: por
+        # debajo de un cuarto de pixel no se ve.
+        return (abs(self.value - self.target) < 0.25 * self.escala
+                and abs(self.vel) < 0.5 * self.escala)
 
     def set(self, target):
         self.target = float(target)

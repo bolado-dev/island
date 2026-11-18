@@ -398,12 +398,16 @@ WIFI_PADX  = 16
 WIFI_PADY  = 12
 WIFI_GAP   = 2
 
-# Muelle del nivel de volumen y brillo. Mas rapido que los de la isla
-# (0,38-0,50) y SIN rebote: esto no es una entrada en escena, es un
-# mando respondiendo, y pasarse del valor pedido se lee como que el
-# aparato no sabe donde esta.
-SP_NIVEL_RESP = 0.26
-SP_NIVEL_DAMP = 1.0
+# Muelle del nivel de volumen y brillo. Con un punto de rebote: sin el
+# la barra llegaba y se paraba en seco, y lo que se pedia era que se
+# notase el movimiento. El rebote es pequeno a proposito --esto sigue
+# siendo un mando y no una entrada en escena-, y al 100% ni se ve
+# porque la barra esta topada.
+# Elegidos midiendo, no a ojo: con esto la barra se pasa un 3,7% del
+# valor y vuelve, y acaba en 0,37 s. Con 0,38/0,80 el rebote era del
+# 0,4% --no se veia- y tardaba 0,53.
+SP_NIVEL_RESP = 0.30
+SP_NIVEL_DAMP = 0.62
 
 # Cuanto puede encoger el contenido mientras la isla crece hacia su
 # tamano. Por debajo de esto no baja: un texto al 40% no se lee, y lo
@@ -413,3 +417,8 @@ ENCAJE_MIN = 0.62
 # Ojo abierto y tachado, para ver u ocultar la contrasena del wifi.
 G_OJO    = ""
 G_OJO_NO = ""
+
+# Monoespaciada grande, para cifras que cambian solas (el porcentaje de
+# volumen y brillo). En proporcional, cada digito mide distinto y el
+# simbolo de porcentaje baila mientras subes la rueda.
+F_MONO_BIG = ("Iosevka Nerd Font", "medium", 26)
