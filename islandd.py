@@ -67,8 +67,17 @@ class Contador(object):
     """
     def __init__(self, texto=""):
         self.actual = self.previo = texto
+        self.dir = 1               # +1 sube, -1 baja
         self.sp = Spring(1.0, response=T.SP_ROLL_RESP,
                          damping=T.SP_ROLL_DAMP, escala=0.01)
+
+    @staticmethod
+    def _valor(texto):
+        """Las cifras del texto como numero, para saber si sube o baja.
+        "23:58" son 2358 y "7%" son 7; lo que no tenga cifras devuelve
+        None y entonces se rueda hacia arriba por convenio."""
+        digitos = "".join(c for c in texto if c.isdigit())
+        return int(digitos) if digitos else None
 
     @property
     def p(self):
@@ -81,6 +90,12 @@ class Contador(object):
         # Si llega otro cambio a mitad de camino, lo de antes se da por
         # visto: el usuario sube el volumen de tres en tres y lo que
         # importa es la cifra nueva, no encadenar animaciones.
+        # Hacia donde rueda. Bajar el volumen tiene que verse al reves
+        # que subirlo: si los dos gestos se dibujan igual, la animacion
+        # deja de decir nada y es solo adorno.
+        antes, ahora = self._valor(self.actual), self._valor(texto)
+        if antes is not None and ahora is not None:
+            self.dir = -1 if ahora < antes else 1
         self.previo = self.actual
         self.actual = texto
         self.sp.snap(0.0)

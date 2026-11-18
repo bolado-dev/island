@@ -224,10 +224,16 @@ class Rodillo(object):
                 # Sin fundido: un reloj de aletas no transparenta, y el
                 # recorte ya impide que se pisen. Fundiendolos, a mitad
                 # de camino los dos digitos se veian lavados.
+                #
+                # El sentido lo dice el contador: subiendo, lo viejo se
+                # va por arriba y lo nuevo entra por abajo; bajando, al
+                # reves. Dibujado igual en los dos casos, la animacion
+                # no diria nada.
+                d = getattr(self.est, "dir", 1)
                 Text(viejo, self.font, self.color,
-                     feats=TNUM).draw(cr, x, cy - h * p, a)
+                     feats=TNUM).draw(cr, x, cy - d * h * p, a)
                 Text(nuevo, self.font, self.color,
-                     feats=TNUM).draw(cr, x, cy + h * (1.0 - p), a)
+                     feats=TNUM).draw(cr, x, cy + d * h * (1.0 - p), a)
                 cr.restore()
             x += cw
 
