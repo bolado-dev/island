@@ -179,6 +179,7 @@ class Island(Gtk.Window):
         self._blink_id = None
         self._seat = None          # captura activa (puntero/teclado)
         self._dentro = False       # el raton, encima de la isla
+        self._hover_r = R.HOVER_R  # forma del realce, la dice cada zona
         # Medidor. Sin numeros, "optimizar" es mover cosas de sitio: lo
         # que se mide es a cuantos fotogramas se va de verdad, cuanto
         # cuesta cada uno y cuantas veces se reconstruye el contenido,
@@ -198,6 +199,14 @@ class Island(Gtk.Window):
         # Entrada del indicador de dictado disponible. Con rebote (0.7):
         # es un aviso de que algo se ha encendido, y un pequeño remate
         # al llegar lo hace notar sin tener que parpadear para siempre.
+        # Nivel de volumen y brillo. Sin muelle, la barra SALTA al valor
+        # nuevo: el evento trae un numero y se pinta tal cual, asi que
+        # subir el volumen de 30 a 70 era un corte, no un movimiento.
+        # Rapido y sin rebote: esto no es una entrada en escena, es un
+        # mando respondiendo, y un rebote ahi se lee como imprecision.
+        self.sp_nivel = Spring(0.0, response=T.SP_NIVEL_RESP,
+                               damping=T.SP_NIVEL_DAMP)
+        self._nivel_de = None      # de que es el nivel que lleva dentro
         self.sp_mic = Spring(0.0, response=0.34, damping=0.70)
         self.sp_rec = Spring(0.0, response=0.34, damping=0.70)
         self._cursor_ptr = None
@@ -474,6 +483,18 @@ class Island(Gtk.Window):
             self.refresh()
             return
 
+        if kind in ("volume", "brightness"):
+            objetivo = max(0.0, min(1.0, float(ev.get("value") or 0) / 100.0))
+            if self._nivel_de != kind:
+                # Al cambiar de mando no se desliza desde el valor del
+                # otro: el brillo al 20% no tiene que venir volando
+                # desde el volumen al 80%.
+                self.sp_nivel.snap(objetivo)
+                self._nivel_de = kind
+            else:
+                self.sp_nivel.set(objetivo)
+            self.ensure_tick()
+
         spec = {
             "volume":     (30, 1.8, "pillx"),
             "brightness": (30, 1.8, "pillx"),
@@ -702,10 +723,13 @@ class Island(Gtk.Window):
                 col = T.DIM2 if d.get("muted") else T.FG
             else:
                 nom, col = "sun", T.ORANGE
+            # La barra va por el muelle y el numero por el valor real:
+            # el numero es un dato y tiene que ser exacto desde el
+            # primer fotograma; la barra es un gesto y puede tardar.
             return R.Row().add(
                 self._ico(nom, 34, col, T.G_SUN),
                 R.Gap(18),
-                R.Bar(260, 10, pct / 100.0, col),
+                R.Bar(260, 10, self.sp_nivel, col),
                 R.Gap(16),
                 R.Text("%d%%" % pct, T.F_TITLE, T.FG))
 
@@ -942,7 +966,7 @@ class Island(Gtk.Window):
             return R.Row().add(
                 R.Row([self._ico(nom, 34, col, T.G_MUTE)], tag="vol-mute"),
                 R.Gap(22),
-                R.Slider(420, 12, pct / 100.0, col, tag="vol-slider"),
+                R.Slider(420, 12, self.sp_nivel, col, tag="vol-slider"),
                 R.Gap(20),
                 R.Text("%d%%" % pct, T.F_TITLE, T.FG))
 
@@ -1106,47 +1130,52 @@ class Island(Gtk.Window):
         # Se mide el SSID mas largo para alinear las barras de cobertura
         # en columna; si no, cada fila las pondria a una altura distinta
         # y la lista se ve descuadrada.
-        # Cada ancho con SU fuente: la conectada va en semibold y mide
-        # mas que las demas. Midiendolas todas igual, el candado y las
-        # barras de esa fila quedarian descuadrados.
-        widths = [R.Text(n[0], T.F_TITLE if n[2] else T.F_SUB,
-                         T.FG).size(cr)[0] for n in nets]
-        maxw = max(widths)
+        ANCHO = T.WIFI_ANCHO
 
-        # El titulo se sangra la misma columna que ocupa el indicador de
-        # "conectada", para que "Wi-Fi" y los nombres de red arranquen en
-        # la misma vertical. Sin esto el titulo queda descolgado a la
-        # izquierda de la lista.
-        # La IP local vive aqui y no en el notch: es un dato de consulta,
-        # no de vistazo, y su sitio natural es junto a la red a la que
-        # pertenece.
-        head = R.Row().add(R.Gap(T.COL_MARK + T.GAP_ITEM),
-                           R.Text("Wi-Fi", T.F_TITLE, T.FG))
+        # Cabecera: el nombre a la izquierda y la IP pegada a la derecha,
+        # en columna con la señal de las filas. La IP local vive aqui y
+        # no en el notch porque es un dato de consulta, no de vistazo, y
+        # su sitio es junto a la red a la que pertenece.
+        titulo = R.Row().add(self._ico("wifi", 24, T.DIM, T.G_WIFI),
+                             R.Gap(T.GAP_ITEM),
+                             R.Text("Wi-Fi", T.F_TITLE, T.FG))
+        head = R.Row([titulo])
         if si.ip:
-            head.add(R.Gap(T.GAP_ITEM),
-                     R.Text("\u00b7", T.F_SUB, T.DIM2),
-                     R.Gap(T.GAP_ITEM),
-                     R.Text(si.ip, T.F_SMALL, T.DIM))
-        rows = [head]
+            ip = R.Text(si.ip, T.F_SMALL, T.DIM2)
+            head.add(R.Gap(max(10, ANCHO - titulo.size(cr)[0]
+                               - ip.size(cr)[0])), ip)
+        rows = [head, R.Rule(ANCHO, T.DIM2)]
 
-        for (ssid, sig, inuse, sec), w in zip(nets, widths):
+        for ssid, sig, inuse, sec in nets:
             lvl = 1 + min(3, sig // 26)
-            mark = (R.Row([R.Gap((T.COL_MARK - 12) / 2.0), R.Dot(6, T.GREEN),
-                           R.Gap((T.COL_MARK - 12) / 2.0)])
-                    if inuse else R.Gap(T.COL_MARK))
-            rows.append(R.Row([
-                mark,
-                R.Gap(T.GAP_ITEM),
-                # La conectada en semibold: el punto verde solo se ve si
-                # miras la columna, y el peso se nota de un vistazo.
-                R.Text(ssid, T.F_TITLE if inuse else T.F_SUB,
-                       T.FG if inuse else T.DIM),
-                R.Gap(maxw - w + T.GAP_GROUP),
-                self._ico("lock", 20, T.DIM2, T.G_LOCK) if sec else R.Gap(0),
-                R.Gap(T.GAP_ITEM),
-                R.Bars(lvl, T.FG if inuse else T.DIM, T.DIM2),
-            ], tag="wifi:" + ssid))
-        return R.Stack(rows, gap=T.GAP_ROW)
+            # Columna de estado, siempre del mismo ancho este o no:
+            # con ella, los nombres arrancan todos en la misma vertical.
+            marca = (R.Row([R.Gap((T.COL_MARK - 6) / 2.0), R.Dot(6, T.GREEN),
+                            R.Gap((T.COL_MARK - 6) / 2.0 - 6)])
+                     if inuse else R.Gap(T.COL_MARK))
+            nombre = R.Text(self._clip(ssid, 22),
+                            T.F_SUB, T.FG if inuse else T.DIM)
+
+            # Derecha: en que estado esta, si pide contrasena y cuanta
+            # cobertura hay. Siempre en el mismo orden y pegado al
+            # borde, que es lo que hace que se lean en columna en vez de
+            # bailar detras de cada nombre.
+            estado = ("conectada" if inuse
+                      else "guardada" if ssid in self.known else "")
+            der = R.Row()
+            if estado:
+                der.add(R.Text(estado, T.F_SMALL,
+                               T.GREEN if inuse else T.DIM2), R.Gap(12))
+            der.add(self._ico("lock", 18, T.DIM2, T.G_LOCK) if sec
+                    else R.Gap(18), R.Gap(12),
+                    R.Bars(lvl, T.FG if inuse else T.DIM, T.DIM2))
+
+            izq = R.Row([marca, R.Gap(T.GAP_ITEM), nombre])
+            hueco = max(10, ANCHO - 2 * 14 - izq.size(cr)[0] - der.size(cr)[0])
+            rows.append(R.Box(R.Row([izq, R.Gap(hueco), der]),
+                              w=ANCHO, padx=14, pady=9, radius=14,
+                              tag="wifi:" + ssid))
+        return R.Stack(rows, gap=8)
 
     def build_calendar(self, cr):
         hoy = datetime.date.today()
@@ -2344,7 +2373,8 @@ class Island(Gtk.Window):
 
         moving = False
         for s in (self.sp_w, self.sp_h, self.sp_fade, self.sp_y,
-                  self.sp_hx, self.sp_hy, self.sp_hw, self.sp_hh, self.sp_ha):
+                  self.sp_hx, self.sp_hy, self.sp_hw, self.sp_hh, self.sp_ha,
+                  self.sp_nivel):
             moving |= s.step(dt)
 
         # Indicador de dictado. Se mira aparte del resto para enterarse
@@ -2491,9 +2521,15 @@ class Island(Gtk.Window):
         # Realce de hover, por detras del contenido.
         ha = max(0.0, min(1.0, self.sp_ha.value)) * f
         if ha > 0.01 and self.sp_hw.value > 1:
+            # El radio lo dice la zona, que es quien sabe que forma
+            # tiene lo que hay debajo. Antes era "la mitad del alto,
+            # hasta 22": una fila de lista de 216x46 se realzaba con una
+            # capsula de extremos semicirculares, una forma que no se
+            # parecia a nada de lo que habia debajo.
+            r = getattr(self, "_hover_r", R.HOVER_R)
             R.capsule(cr, self.sp_hx.value, self.sp_hy.value,
                       self.sp_hw.value, self.sp_hh.value,
-                      min(self.sp_hh.value / 2.0, 22))
+                      min(r, self.sp_hh.value / 2.0))
             cr.set_source_rgba(1, 1, 1, T.HOVER_A * ha)
             cr.fill()
 
@@ -2569,11 +2605,11 @@ class Island(Gtk.Window):
         acertaba en la fila entera y no en el segmento.
         """
         mejor = None
-        for tag, hx, hy, hw, hh in R.get_hits():
+        for tag, hx, hy, hw, hh, _r in R.get_hits():
             if hx <= x <= hx + hw and hy <= y <= hy + hh:
                 area = hw * hh
                 if mejor is None or area < mejor[0]:
-                    mejor = (area, tag, (hx, hy, hw, hh))
+                    mejor = (area, tag, (hx, hy, hw, hh, _r))
         return (mejor[1], mejor[2]) if mejor else (None, None)
 
     def on_click(self, widget, ev):
@@ -2727,7 +2763,10 @@ class Island(Gtk.Window):
         if tag is None:
             self.sp_ha.set(0.0)          # se desvanece donde este
         else:
-            hx, hy, hw, hh = rect
+            hx, hy, hw, hh, radio = rect
+            # El radio NO se anima: son unos pocos pixeles y animarlo
+            # obligaria a un muelle mas para algo que nadie ve moverse.
+            self._hover_r = radio
             if self.sp_ha.value < 0.05:
                 # Primera zona tras entrar: aparece ya colocada, para que
                 # no se vea venir volando desde la posicion anterior.
@@ -2768,7 +2807,7 @@ class Island(Gtk.Window):
         tag, rect = self._hit(ev.x, ev.y)
 
         if self._drag == "vol-slider" and (ev.state & Gdk.ModifierType.BUTTON1_MASK):
-            for t, hx, hy, hw, hh in R.get_hits():
+            for t, hx, hy, hw, hh, _r in R.get_hits():
                 if t == "vol-slider":
                     self._slide(ev.x, (hx, hy, hw, hh))
                     break
@@ -2804,7 +2843,9 @@ class Island(Gtk.Window):
         return False
 
     def _slide(self, x, rect):
-        hx, _hy, hw, _hh = rect
+        # La zona puede venir con el radio del realce detras: aqui solo
+        # interesan la x y el ancho.
+        hx, hw = rect[0], rect[2]
         # La zona lleva 12px de margen a cada lado para que sea comoda de
         # pulsar; hay que descontarlos o el 0% y el 100% caerian fuera
         # del recorrido real de la barra.

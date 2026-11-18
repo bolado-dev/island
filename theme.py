@@ -385,3 +385,15 @@ PP_MONO = ("ruta", "cmd", "codigo", "color", "numero")
 # Chincheta de lo fijado. Rellena y en azul: es lo unico de la
 # lista que has decidido tu, el resto llega solo.
 G_PIN   = ""
+
+# Ancho del panel de wifi. Fijo y no "lo que midan las redes": con filas
+# de ancho variable, el realce del raton cambiaba de tamano al moverse
+# entre ellas y la lista se veia desalineada por la derecha.
+WIFI_ANCHO = 520
+
+# Muelle del nivel de volumen y brillo. Mas rapido que los de la isla
+# (0,38-0,50) y SIN rebote: esto no es una entrada en escena, es un
+# mando respondiendo, y pasarse del valor pedido se lee como que el
+# aparato no sabe donde esta.
+SP_NIVEL_RESP = 0.26
+SP_NIVEL_DAMP = 1.0

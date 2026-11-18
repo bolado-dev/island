@@ -53,8 +53,25 @@ def get_hits():
     return list(_hits)
 
 
-def _record(tag, x, cy, w, h, pad=10):
-    _hits.append((tag, x - pad, cy - h / 2.0 - pad, w + 2 * pad, h + 2 * pad))
+# Radio por defecto del realce del raton. 16 y no "la mitad del alto":
+# con la mitad, una fila de 46 px de alto y 216 de ancho se realzaba con
+# una capsula de extremos semicirculares flotando sobre el texto, que es
+# una forma que no se parece a nada de lo que hay debajo.
+HOVER_R = 16
+
+
+def _record(tag, x, cy, w, h, pad=10, radius=None):
+    """Apunta una zona sensible y CON QUE FORMA se realza.
+
+    La forma viaja con la zona porque solo aqui se sabe: un chip
+    redondeado, una celda de la rejilla y una fila de lista tienen
+    radios distintos, y el realce tiene que adoptar el de lo que hay
+    debajo o se ve como una pegatina encima.
+    """
+    rw, rh = w + 2 * pad, h + 2 * pad
+    r = HOVER_R if radius is None else radius
+    _hits.append((tag, x - pad, cy - h / 2.0 - pad, rw, rh,
+                  min(r, rh / 2.0, rw / 2.0)))
 
 
 def font_desc(spec):
@@ -260,10 +277,24 @@ class Dot(object):
         cr.fill()
 
 
+def _frac(v):
+    """El valor, leido EN VIVO si viene de un muelle.
+
+    El contenido de la isla no se reconstruye en cada fotograma --solo
+    se repinta-, asi que un numero guardado al construir se queda
+    congelado: la barra marcaria el valor que tenia al llegar el evento
+    y no se moveria nunca. Aceptando el muelle en vez de su valor, el
+    dibujado lee el de ESTE fotograma. Es lo mismo que hace la onda del
+    dictado con la lista de niveles.
+    """
+    x = v.value if hasattr(v, "value") else v
+    return max(0.0, min(1.0, x))
+
+
 class Bar(object):
     """Barra de progreso de extremos redondos (volumen, brillo)."""
     def __init__(self, w, h, frac, color, bg=T.DIM2):
-        self.w, self.h, self.frac = w, h, max(0.0, min(1.0, frac))
+        self.w, self.h, self.frac = w, h, frac
         self.color, self.bg = color, bg
 
     def size(self, cr):
@@ -274,7 +305,7 @@ class Bar(object):
         capsule(cr, x, y, self.w, self.h)
         cr.set_source_rgba(*self.bg, a)
         cr.fill()
-        fw = self.w * self.frac
+        fw = self.w * _frac(self.frac)
         if fw > 0.5:
             # El relleno nunca puede ser mas estrecho que su propio radio
             # o el arco se cruza y cairo pinta una lenteja al reves.
@@ -357,7 +388,7 @@ class Slider(object):
     """
     def __init__(self, w, h, frac, color, tag=None, knob=True):
         self.w, self.h = w, h
-        self.frac = max(0.0, min(1.0, frac))
+        self.frac = frac
         self.color, self.tag, self.knob = color, tag, knob
 
     def size(self, cr):
@@ -370,7 +401,7 @@ class Slider(object):
         capsule(cr, x, y, self.w, self.h)
         cr.set_source_rgba(*T.SURF_2, a)
         cr.fill()
-        fw = self.w * self.frac
+        fw = self.w * _frac(self.frac)
         if fw > 0.5:
             capsule(cr, x, y, max(fw, self.h), self.h)
             cr.set_source_rgba(*self.color, a)
@@ -641,7 +672,7 @@ class Box(object):
     def draw(self, cr, x, cy, a):
         w, h = self.size(cr)
         if self.tag:
-            _record(self.tag, x, cy, w, h, pad=0)
+            _record(self.tag, x, cy, w, h, pad=0, radius=self.radius)
         if self.bg is not None:
             capsule(cr, x, cy - h / 2.0, w, h, self.radius)
             cr.set_source_rgba(*self.bg, a)
@@ -1032,7 +1063,8 @@ class Cell(object):
 
     def draw(self, cr, x, cy, a):
         if self.tag:
-            _record(self.tag, x, cy, self.w, self.h, pad=0)
+            _record(self.tag, x, cy, self.w, self.h, pad=0,
+                    radius=self.radius)
         if self.bg is not None:
             m = 3.0           # aire para que el realce no toque al vecino
             capsule(cr, x + m, cy - self.h / 2.0 + m,
