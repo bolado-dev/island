@@ -170,13 +170,24 @@ la alternativa tonta sale a 0,1% de un núcleo: un `xclip -o` son 3 ms, uno
 cada tres segundos.
 
 <p align="center">
-  <img src="docs/emoji.gif" alt="Al pulsar super y punto el notch se despliega en una rejilla de emoji en color; al escribir fuego la rejilla se queda en una fila y al pulsar intro el panel se cierra y el notch vuelve a replegarse" width="760">
+  <img src="docs/emoji.gif" alt="Al pulsar super y punto el notch se despliega en una rejilla de emoji en color con una barra de categorías abajo; el tabulador y el ratón cambian de categoría, y al escribir fuego la barra desaparece y la rejilla se queda en una fila" width="760">
 </p>
 
 **Selector de emoji**, en `super + .` como el de Windows. Escribes, eliges y el
 emoji aparece **en la ventana que tenías delante**, no en el portapapeles para
-que lo pegues tú. Las flechas mueven, el tabulador salta de grupo y los que
-más usas salen los primeros.
+que lo pegues tú. Las flechas mueven y los que más usas salen los primeros.
+
+**Las categorías van abajo**, como en el teclado de iOS: se pulsan, el tabulador
+las recorre, y la actual se marca sola según dónde estés en la rejilla. El icono
+de cada una es **un emoji de esa misma categoría** y no un glifo de Nerd Font:
+la rejilla ya está hecha de emoji en color, y meter ahí iconos monocromos de
+otra familia sería mezclar dos idiomas en un palmo.
+
+Dos detalles que solo se ven usando esto. Al saltar a una categoría, su primera
+fila queda **arriba del todo** y no pegada abajo: desplazar lo justo para que se
+vea es lo que quieren las flechas, pero saltar a un sitio es empezar a mirar
+ahí. Y la barra **desaparece al buscar**, porque los resultados salen de toda la
+lista y mezclados, así que ahí las categorías ya no estructuran nada.
 
 **Busca en castellano**, que es lo que uno escribe: «fuego» encuentra 🔥 y
 «cohete» 🚀. Los nombres salen de [CLDR](https://github.com/unicode-org/cldr)

@@ -1419,6 +1419,34 @@ class Island(Gtk.Window):
             st["top"] = fila - T.EMO_FILAS + 1
         st["top"] = max(0, min(st["top"], max(0, filas - T.EMO_FILAS)))
 
+    @staticmethod
+    def _emo_cats(res):
+        """[(etiqueta, indice donde empieza)] en el orden de la lista.
+
+        Se calcula de la propia lista y no de una tabla fija: asi
+        "Recientes" aparece solo cuando hay algo usado, y el orden es
+        siempre el mismo que ve la rejilla.
+        """
+        cats = []
+        for i, e in enumerate(res):
+            if not cats or e[2] != cats[-1][0]:
+                cats.append((e[2], i))
+        return cats
+
+    def _emo_ir(self, indice):
+        """Lleva la seleccion ahi y pone ESA fila arriba del todo.
+
+        _emo_vista solo desplaza lo justo para que se vea, que es lo que
+        quieren las flechas; pero al saltar a una categoria dejaria su
+        primera fila pegada abajo, con el grupo anterior ocupando la
+        rejilla. Saltar a un sitio es empezar a mirar ahi.
+        """
+        st = self.emo
+        st["sel"] = max(0, min(indice, len(st["res"]) - 1))
+        filas = (len(st["res"]) + T.EMO_COLS - 1) // T.EMO_COLS
+        st["top"] = max(0, min(st["sel"] // T.EMO_COLS,
+                               max(0, filas - T.EMO_FILAS)))
+
     def _emo_grupo(self, paso):
         """Salta al primer emoji del grupo siguiente o anterior."""
         st = self.emo
@@ -1429,11 +1457,11 @@ class Island(Gtk.Window):
         inicios = [0] + [i for i in range(1, len(res))
                          if res[i][2] != res[i - 1][2]]
         if paso > 0:
-            st["sel"] = next((i for i in inicios if i > st["sel"]),
-                             inicios[-1])
+            self._emo_ir(next((i for i in inicios if i > st["sel"]),
+                              inicios[-1]))
         else:
             previos = [i for i in inicios if i < st["sel"]]
-            st["sel"] = previos[-1] if previos else 0
+            self._emo_ir(previos[-1] if previos else 0)
 
     def build_emoji(self, cr):
         st = self.emo or {"q": "", "sel": 0, "top": 0, "res": []}
@@ -1482,16 +1510,46 @@ class Island(Gtk.Window):
         nombre = R.Text(self._clip(res[sel][1], 32), T.F_SMALL, T.FG)
         grupo = R.Text(res[sel][2], T.F_SMALL, T.DIM2)
         hueco = max(10, ANCHO - nombre.size(cr)[0] - grupo.size(cr)[0])
-        return R.Stack([
-            cab,
-            R.Stack(rejilla, gap=0),
-            R.Rule(ANCHO, T.DIM2),
-            R.Row([nombre, R.Gap(hueco), grupo]),
-            R.Row().add(R.Text(
-                "\u2190\u2192\u2191\u2193 mover \u00b7 \u21e5 grupo "
-                "\u00b7 \u23ce insertar \u00b7 esc cerrar",
-                T.F_SMALL, T.DIM2)),
-        ], gap=10)
+
+        partes = [cab, R.Stack(rejilla, gap=0)]
+        # Con busqueda NO hay barra de categorias: los resultados vienen
+        # de toda la lista y mezclados, asi que una barra ahi senalaria
+        # a grupos que ya no estructuran nada.
+        partes.append(R.Rule(ANCHO, T.DIM2))
+        if not st["q"]:
+            # Debajo del filete y no encima: asi la barra pertenece al
+            # pie --con el nombre y la ayuda- en vez de colgar de la
+            # ultima fila de la rejilla, que es donde se veia pegada.
+            partes.append(self._emo_barra(cr, res, sel, ANCHO))
+        partes.append(R.Row([nombre, R.Gap(hueco), grupo]))
+        partes.append(R.Row().add(R.Text(
+            "\u2190\u2192\u2191\u2193 mover \u00b7 \u21e5 categor\u00eda "
+            "\u00b7 \u23ce insertar \u00b7 esc cerrar",
+            T.F_SMALL, T.DIM2)))
+        return R.Stack(partes, gap=10)
+
+    def _emo_barra(self, cr, res, sel, ancho):
+        """Las categorias, abajo, como en el teclado de iOS."""
+        cats = self._emo_cats(res)
+        # La activa es la ULTIMA que empieza en o antes de la seleccion.
+        activa = 0
+        for n, (_etq, ini) in enumerate(cats):
+            if ini <= sel:
+                activa = n
+        fila = R.Row()
+        celda = min(T.EMO_CAT_CELDA, ancho / float(max(1, len(cats))))
+        for n, (etq, _ini) in enumerate(cats):
+            icono = T.EMO_CATS.get(etq)
+            dibujo = (R.Emoji(icono, alpha=1.0 if n == activa
+                              else T.EMO_CAT_ALFA)
+                      if icono else R.Text(etq[:2], T.F_SMALL, T.DIM))
+            fila.add(R.Cell(dibujo, celda, celda,
+                            bg=T.SURF_2 if n == activa else None,
+                            radius=12, tag="cat:%d" % n))
+        # Centrada bajo la rejilla: las categorias son menos anchas que
+        # las diez columnas y pegadas a la izquierda se verian sueltas.
+        sobra = max(0.0, ancho - celda * len(cats))
+        return R.Row([R.Gap(sobra / 2.0), fila])
 
     def _key_emoji(self, ev):
         st = self.emo
@@ -2469,6 +2527,12 @@ class Island(Gtk.Window):
         elif tag.startswith("emo:"):
             self.emo["sel"] = int(tag[4:])
             self._emoji_sel()
+        elif tag.startswith("cat:"):
+            cats = self._emo_cats(self.emo["res"])
+            n = int(tag[4:])
+            if n < len(cats):
+                self._emo_ir(cats[n][1])
+            self.refresh()
         elif tag.startswith("cap:"):
             self._captura_accion(tag[4:])
         elif tag.startswith("pp:"):
@@ -2519,7 +2583,8 @@ class Island(Gtk.Window):
                         "vol-mixer", "clock")
                 or tag == "dnd" or tag.startswith("ws")
                 or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
-                                   "ds:", "media:", "emo:", "cap:", "pp:")))
+                                   "ds:", "media:", "emo:", "cap:", "pp:",
+                                   "cat:")))
 
     def _set_cursor(self, pointer):
         if pointer == self._cursor_ptr:

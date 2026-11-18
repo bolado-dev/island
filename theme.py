@@ -299,6 +299,27 @@ EMO_ANCHO = EMO_COLS * EMO_CELDA
 # uniforme sin medir celda por celda.
 F_EMOJI   = ("Noto Color Emoji", "normal", 30)
 
+# Barra de categorias, abajo como en el teclado de iOS. El icono de
+# cada grupo es un EMOJI del propio grupo y no un glifo de Nerd Font:
+# la rejilla ya esta hecha de emoji en color, y meter ahi iconos
+# monocromos de otra familia seria mezclar dos idiomas en un palmo.
+EMO_CAT_CELDA = 44
+EMO_CATS = {
+    "Recientes":             "\U0001F553",
+    "Caras y emociones":     "\U0001F600",
+    "Gente y cuerpo":        "\U0001F44B",
+    "Animales y naturaleza": "\U0001F435",
+    "Comida y bebida":       "\U0001F347",
+    "Viajes y lugares":      "\U0001F30D",
+    "Actividades":           "\u26BD",
+    "Objetos":               "\U0001F4A1",
+    "Simbolos":              "\u2764\uFE0F",
+    "Banderas":              "\U0001F3C1",
+}
+# Opacidad de una categoria que no es la actual. No se apaga del todo:
+# tienen que seguir reconociendose para poder ir a una.
+EMO_CAT_ALFA = 0.45
+
 # ------------------------------------------------------------ capturas
 # Alto de la miniatura en la tarjeta. H_CARD son 112, asi que 72 deja 20
 # de aire arriba y abajo, el mismo que el icono de una notificacion.
