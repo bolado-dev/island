@@ -1133,49 +1133,47 @@ class Island(Gtk.Window):
         ANCHO = T.WIFI_ANCHO
 
         # Cabecera: el nombre a la izquierda y la IP pegada a la derecha,
-        # en columna con la señal de las filas. La IP local vive aqui y
-        # no en el notch porque es un dato de consulta, no de vistazo, y
-        # su sitio es junto a la red a la que pertenece.
+        # en la misma columna que la cobertura de las filas. La IP local
+        # vive aqui y no en el notch porque es un dato de consulta, no de
+        # vistazo, y su sitio es junto a la red a la que pertenece.
         titulo = R.Row().add(self._ico("wifi", 24, T.DIM, T.G_WIFI),
                              R.Gap(T.GAP_ITEM),
                              R.Text("Wi-Fi", T.F_TITLE, T.FG))
-        head = R.Row([titulo])
+        head = R.Row([R.Gap(T.WIFI_PADX), titulo])
         if si.ip:
             ip = R.Text(si.ip, T.F_SMALL, T.DIM2)
-            head.add(R.Gap(max(10, ANCHO - titulo.size(cr)[0]
-                               - ip.size(cr)[0])), ip)
-        rows = [head, R.Rule(ANCHO, T.DIM2)]
+            head.add(R.Gap(max(10, ANCHO - 2 * T.WIFI_PADX
+                               - titulo.size(cr)[0] - ip.size(cr)[0])),
+                     ip, R.Gap(T.WIFI_PADX))
 
+        filas = []
         for ssid, sig, inuse, sec in nets:
             lvl = 1 + min(3, sig // 26)
-            # Columna de estado, siempre del mismo ancho este o no:
-            # con ella, los nombres arrancan todos en la misma vertical.
-            marca = (R.Row([R.Gap((T.COL_MARK - 6) / 2.0), R.Dot(6, T.GREEN),
-                            R.Gap((T.COL_MARK - 6) / 2.0 - 6)])
-                     if inuse else R.Gap(T.COL_MARK))
-            nombre = R.Text(self._clip(ssid, 22),
-                            T.F_SUB, T.FG if inuse else T.DIM)
+            # A cual estas conectado lo dice el PESO del nombre, no un
+            # adorno al lado: en una lista de cuatro cosas, lo que se
+            # mira son los nombres.
+            nombre = R.Text(self._clip(ssid, 26),
+                            T.F_TITLE if inuse else T.F_SUB,
+                            T.FG if inuse else T.DIM)
+            # Candado y cobertura, en ese orden y pegados al borde. El
+            # hueco del candado se reserva aunque la red sea abierta, o
+            # la columna de la cobertura bailaria de fila en fila.
+            der = R.Row([
+                self._ico("lock", 18, T.DIM2, T.G_LOCK) if sec else R.Gap(18),
+                R.Gap(T.GAP_ITEM),
+                R.Bars(lvl, T.FG if inuse else T.DIM, T.DIM2),
+            ])
+            hueco = max(10, ANCHO - 2 * T.WIFI_PADX
+                        - nombre.size(cr)[0] - der.size(cr)[0])
+            filas.append(R.Box(R.Row([nombre, R.Gap(hueco), der]),
+                               w=ANCHO, padx=T.WIFI_PADX, pady=T.WIFI_PADY,
+                               radius=14, tag="wifi:" + ssid))
 
-            # Derecha: en que estado esta, si pide contrasena y cuanta
-            # cobertura hay. Siempre en el mismo orden y pegado al
-            # borde, que es lo que hace que se lean en columna en vez de
-            # bailar detras de cada nombre.
-            estado = ("conectada" if inuse
-                      else "guardada" if ssid in self.known else "")
-            der = R.Row()
-            if estado:
-                der.add(R.Text(estado, T.F_SMALL,
-                               T.GREEN if inuse else T.DIM2), R.Gap(12))
-            der.add(self._ico("lock", 18, T.DIM2, T.G_LOCK) if sec
-                    else R.Gap(18), R.Gap(12),
-                    R.Bars(lvl, T.FG if inuse else T.DIM, T.DIM2))
-
-            izq = R.Row([marca, R.Gap(T.GAP_ITEM), nombre])
-            hueco = max(10, ANCHO - 2 * 14 - izq.size(cr)[0] - der.size(cr)[0])
-            rows.append(R.Box(R.Row([izq, R.Gap(hueco), der]),
-                              w=ANCHO, padx=14, pady=9, radius=14,
-                              tag="wifi:" + ssid))
-        return R.Stack(rows, gap=8)
+        # Las filas van casi pegadas y con aire DENTRO: asi se leen como
+        # una lista. Separandolas tanto como el aire que llevan dentro
+        # --que es como estaba- cada una parecia una tarjeta suelta.
+        return R.Stack([head, R.Rule(ANCHO, T.DIM2),
+                        R.Stack(filas, gap=T.WIFI_GAP)], gap=T.GAP_ITEM)
 
     def build_calendar(self, cr):
         hoy = datetime.date.today()

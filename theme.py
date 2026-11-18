@@ -386,10 +386,17 @@ PP_MONO = ("ruta", "cmd", "codigo", "color", "numero")
 # lista que has decidido tu, el resto llega solo.
 G_PIN   = ""
 
-# Ancho del panel de wifi. Fijo y no "lo que midan las redes": con filas
-# de ancho variable, el realce del raton cambiaba de tamano al moverse
-# entre ellas y la lista se veia desalineada por la derecha.
-WIFI_ANCHO = 520
+# Panel de wifi. El ancho es fijo y no "lo que midan las redes": con
+# filas de ancho variable, el realce del raton cambiaba de tamano al
+# moverse entre ellas y la lista quedaba desalineada por la derecha.
+#
+# Y el aire va DENTRO de la fila, no entre filas: separandolas tanto
+# como el relleno que llevan dentro, cada una parecia una tarjeta
+# suelta en vez de una lista.
+WIFI_ANCHO = 460
+WIFI_PADX  = 16
+WIFI_PADY  = 12
+WIFI_GAP   = 2
 
 # Muelle del nivel de volumen y brillo. Mas rapido que los de la isla
 # (0,38-0,50) y SIN rebote: esto no es una entrada en escena, es un
