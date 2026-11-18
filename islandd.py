@@ -1610,6 +1610,8 @@ class Island(Gtk.Window):
         return R.Row([R.Gap(sobra / 2.0), fila])
 
     def _key_emoji(self, ev):
+        if self._atajo_propio(ev, "emoji"):
+            return True
         st = self.emo
         kv = ev.keyval
         pag = T.EMO_COLS * T.EMO_FILAS
@@ -1839,6 +1841,8 @@ class Island(Gtk.Window):
                      w=ancho, padx=12, pady=7, tag="pp:%d" % i)
 
     def _key_port(self, ev):
+        if self._atajo_propio(ev, "portapapeles"):
+            return True
         st = self.port
         kv = ev.keyval
         if kv == Gdk.KEY_Escape:
@@ -2151,7 +2155,25 @@ class Island(Gtk.Window):
                 self.refresh()
         return True
 
+    def _atajo_propio(self, ev, panel):
+        """Gestiona una pulsacion CON super mientras hay panel abierto.
+
+        Devuelve True si ya esta tratada. Dos cosas, y las dos hacen
+        falta: si es el mismo atajo que lo abrio, se cierra; y en
+        cualquier caso no se escribe en el campo, porque con super
+        pulsado lo que hay es un atajo, no texto.
+        """
+        if not (ev.state & Gdk.ModifierType.MOD4_MASK):
+            return False
+        nombre = C.PANEL_TECLA.get(panel)
+        if nombre and ev.keyval == Gdk.keyval_from_name(nombre):
+            self._close_panel()
+            self.refresh()
+        return True
+
     def _key_launcher(self, ev):
+        if self._atajo_propio(ev, "launcher"):
+            return True
         st = self.launch
         kv = ev.keyval
         if kv == Gdk.KEY_Escape:

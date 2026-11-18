@@ -162,3 +162,18 @@ CAPTURA_ESPERA = 0.40
 # no pinta NADA encima: solo cambia el cursor y traza una linea fina al
 # arrastrar, asi que al pulsar el atajo parece que no ha pasado nada.
 CAPTURA_SELECTOR = "isla"
+
+# ------------------------------------------------- atajos de los paneles
+# La tecla de cada panel, para que repetir su atajo lo CIERRE.
+#
+# Tiene que coincidir con tu sxhkdrc, y la isla no puede preguntarselo:
+# mientras un panel esta abierto tiene agarrado el teclado, asi que
+# sxhkd no llega a ver la combinacion y no puede volver a dispararla.
+# La segunda pulsacion le llega a la isla como una tecla normal --por
+# eso "super + d" con el lanzador abierto escribia una "d" en la
+# busqueda- y es ella quien decide cerrarse.
+PANEL_TECLA = {
+    "launcher":     "d",
+    "emoji":        "period",
+    "portapapeles": "v",
+}

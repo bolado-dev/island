@@ -110,11 +110,24 @@ menú de sesión.
   <img src="docs/launcher.png" alt="Lanzador: campo de búsqueda, resultado destacado en grande con su icono y tipo, y debajo la lista con el tipo de cada resultado alineado a la derecha" width="620">
 </p>
 
+<p align="center">
+  <img src="docs/launcher.gif" alt="El lanzador con una búsqueda escrita; al volver a pulsar super y d se cierra y el notch se repliega" width="760">
+</p>
+
 **Lanzador.** Aplicaciones, ventanas abiertas, una calculadora, ejecución de
 comandos y lo último que has copiado, en una sola lista ordenada por
 relevancia y por uso. Las ventanas
 van primero a propósito: en un gestor de mosaico lo que sueles querer es
 saltar a algo que ya tienes abierto, no abrir otra instancia.
+
+**El mismo atajo lo cierra.** `super + d` otra vez y se va, igual que
+`super + .` y `super + v` con los suyos. Tiene miga: mientras un panel está
+abierto tiene agarrado el teclado, así que sxhkd **no llega a ver** la
+combinación y no puede volver a dispararla. La segunda pulsación le llega a la
+isla como una tecla normal --por eso antes `super + d` escribía una `d` en la
+búsqueda- y es ella quien decide cerrarse. La tecla de cada panel está en
+`config.PANEL_TECLA`, y tiene que coincidir con tu `sxhkdrc` porque la isla no
+puede preguntárselo a nadie.
 
 La calculadora no usa `eval()`: recorre el árbol de sintaxis y rechaza
 cualquier nodo que no sea aritmética. Un lanzador evaluando lo que tecleas
