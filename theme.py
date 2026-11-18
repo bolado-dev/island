@@ -417,3 +417,9 @@ ENCAJE_MIN = 0.62
 # Ojo abierto y tachado, para ver u ocultar la contrasena del wifi.
 G_OJO    = ""
 G_OJO_NO = ""
+
+# Muelle de las cifras que ruedan (reloj, volumen, brillo, bateria).
+# Rapido y sin rebote: un digito que se pasa y vuelve no se lee como un
+# reloj de aletas, se lee como un fallo.
+SP_ROLL_RESP = 0.44
+SP_ROLL_DAMP = 1.0

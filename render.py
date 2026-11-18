@@ -112,20 +112,27 @@ def capsule(cr, x, y, w, h, r=None):
 # --------------------------------------------------------------- items
 
 class Text(object):
-    def __init__(self, s, font, color, alpha=1.0, tag=None):
+    def __init__(self, s, font, color, alpha=1.0, tag=None, feats=None):
         self.s, self.font, self.color, self.alpha = s, font, color, alpha
-        self.tag = tag
+        self.tag, self.feats = tag, feats
         self._layout = None
 
     def layout(self, cr):
         if self._layout is None:
-            key = (self.s, self.font)
+            key = (self.s, self.font, self.feats)
             l = _layout_cache.get(key)
             if l is None:
                 if len(_layout_cache) >= _LAYOUT_MAX:
                     _layout_cache.clear()
                 l = PangoCairo.create_layout(cr)
                 l.set_font_description(font_desc(self.font))
+                if self.feats:
+                    # Cifras tabulares y demas. Van por atributos del
+                    # layout y no por la descripcion de fuente, que no
+                    # tiene donde guardarlas.
+                    al = Pango.AttrList()
+                    al.insert(Pango.attr_font_features_new(self.feats))
+                    l.set_attributes(al)
                 l.set_text(self.s, -1)
                 _layout_cache[key] = l
             self._layout = l
@@ -150,6 +157,79 @@ class Text(object):
         PangoCairo.update_layout(cr, l)
         PangoCairo.show_layout(cr, l)
         cr.restore()
+
+
+# Cifras tabulares: todos los digitos del mismo ancho. Sin esto, en
+# Inter el "1" mide 13 px y el "4" 23, asi que el reloj cambiaba de
+# ancho al pasar los minutos --y con el, la isla entera- y un digito
+# rodando no tendria una casilla fija donde hacerlo.
+TNUM = "tnum=1"
+
+
+class Rodillo(object):
+    """Cifras que cambian rodando, como un reloj de aletas.
+
+    Solo se mueve lo que cambia: al pasar de 23:58 a 23:59, el 8 sale
+    por arriba y el 9 entra por abajo mientras el resto se queda
+    quieto. Es lo que hace que el ojo vea QUE ha cambiado sin tener que
+    leer el numero entero.
+
+    El estado (texto anterior, actual y por donde va) no vive aqui: el
+    contenido de la isla se reconstruye cuando cambia algo, asi que un
+    objeto de dibujo no puede recordar nada entre fotogramas.
+    """
+    def __init__(self, est, font, color, tag=None):
+        self.est, self.font, self.color, self.tag = est, font, color, tag
+
+    def _celdas(self, cr):
+        """[(caracter nuevo, caracter viejo, ancho)] alineado a la
+        DERECHA: los numeros crecen hacia la izquierda, asi que al pasar
+        de 9% a 10% lo que se corresponde es el % con el % y el 9 con el
+        0, no el 9 con el 1."""
+        a, b = self.est.actual, self.est.previo
+        n = max(len(a), len(b))
+        a, b = a.rjust(n), b.rjust(n)
+        out = []
+        for nuevo, viejo in zip(a, b):
+            # El ancho es el del MAS ancho de los dos: al pasar de 100%
+            # a 99% la casilla del primer digito la ocupa un espacio, y
+            # midiendo solo lo nuevo el 1 que todavia esta saliendo se
+            # recortaba a la mitad.
+            w = max(Text(c, self.font, self.color, feats=TNUM).size(cr)[0]
+                    for c in (nuevo, viejo))
+            out.append((nuevo, viejo, w))
+        return out
+
+    def size(self, cr):
+        celdas = self._celdas(cr)
+        alto = Text(self.est.actual or "0", self.font, self.color,
+                    feats=TNUM).size(cr)[1]
+        return sum(c[2] for c in celdas), alto
+
+    def draw(self, cr, x, cy, a):
+        w, h = self.size(cr)
+        if self.tag:
+            _record(self.tag, x, cy, w, h)
+        p = max(0.0, min(1.0, self.est.p))
+        for nuevo, viejo, cw in self._celdas(cr):
+            if nuevo == viejo or p >= 0.999:
+                Text(nuevo, self.font, self.color,
+                     feats=TNUM).draw(cr, x, cy, a)
+            else:
+                # Recortado a su casilla: lo que entra y lo que sale no
+                # pueden invadir al vecino ni salirse de la isla.
+                cr.save()
+                cr.rectangle(x, cy - h / 2.0, cw, h)
+                cr.clip()
+                # Sin fundido: un reloj de aletas no transparenta, y el
+                # recorte ya impide que se pisen. Fundiendolos, a mitad
+                # de camino los dos digitos se veian lavados.
+                Text(viejo, self.font, self.color,
+                     feats=TNUM).draw(cr, x, cy - h * p, a)
+                Text(nuevo, self.font, self.color,
+                     feats=TNUM).draw(cr, x, cy + h * (1.0 - p), a)
+                cr.restore()
+            x += cw
 
 
 class Image(object):

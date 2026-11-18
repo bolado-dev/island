@@ -57,6 +57,37 @@ class _Fase(object):
         return self._isla.anim
 
 
+class Contador(object):
+    """Lo que una cifra necesita recordar para rodar: de que valor
+    venia, a cual va y por donde va el camino.
+
+    Vive en la isla y no en el objeto de dibujo porque el contenido se
+    reconstruye cada vez que cambia algo: un dibujo no puede acordarse
+    de nada entre fotogramas.
+    """
+    def __init__(self, texto=""):
+        self.actual = self.previo = texto
+        self.sp = Spring(1.0, response=T.SP_ROLL_RESP,
+                         damping=T.SP_ROLL_DAMP, escala=0.01)
+
+    @property
+    def p(self):
+        return self.sp.value
+
+    def set(self, texto):
+        """Devuelve True si hay rodillo nuevo que animar."""
+        if texto == self.actual:
+            return False
+        # Si llega otro cambio a mitad de camino, lo de antes se da por
+        # visto: el usuario sube el volumen de tres en tres y lo que
+        # importa es la cifra nueva, no encadenar animaciones.
+        self.previo = self.actual
+        self.actual = texto
+        self.sp.snap(0.0)
+        self.sp.set(1.0)
+        return True
+
+
 class Activity(object):
     """Algo que la isla muestra. 'pill' crece a lo ancho; 'card' crece
     tambien a lo alto y admite dos lineas."""
@@ -198,6 +229,7 @@ class Island(Gtk.Window):
         # La fase del ciclo de 1,4 s, envuelta para que los dibujos la
         # lean EN VIVO: el contenido no se reconstruye en cada fotograma.
         self.sp_anim = _Fase(self)
+        self._cont = {}            # cifras que ruedan, por nombre
         # Medidor. Sin numeros, "optimizar" es mover cosas de sitio: lo
         # que se mide es a cuantos fotogramas se va de verdad, cuanto
         # cuesta cada uno y cuantas veces se reconstruye el contenido,
@@ -631,7 +663,8 @@ class Island(Gtk.Window):
         row = R.Row()
         # Reloj y fecha forman un grupo pulsable que abre el calendario.
         row.add(R.Row([
-            R.Text(time.strftime("%H:%M"), T.F_CLOCK, T.FG),
+            R.Rodillo(self._rodillo("reloj", time.strftime("%H:%M")),
+                      T.F_CLOCK, T.FG),
             # La fecha acompana al reloj: mismo grupo, por eso GAP_ITEM y
             # no GAP_GROUP. Mas pequena y apagada para que el reloj siga
             # siendo el ancla visual del notch.
@@ -718,12 +751,14 @@ class Island(Gtk.Window):
         row.add(R.Gap(T.GAP_ITEM))
         if si.charging:
             bat = [self._ico("bolt", 28, T.GREEN, T.G_BOLT), R.Gap(6),
-                   R.Text("%d%%" % si.battery, T.F_TITLE, T.GREEN)]
+                   R.Rodillo(self._rodillo("bat", "%d%%" % si.battery),
+                             T.F_TITLE, T.GREEN)]
         else:
             lvl = min(4, max(0, si.battery * 5 // 100))
             col = T.RED if si.battery <= 15 else T.FG
             bat = [self._ico("bat-%d" % lvl, 28, col, T.G_BAT[lvl]), R.Gap(6),
-                   R.Text("%d%%" % si.battery, T.F_TITLE, col)]
+                   R.Rodillo(self._rodillo("bat", "%d%%" % si.battery),
+                             T.F_TITLE, col)]
         row.add(R.Row(bat, tag="bat"))
         row.add(R.Gap(T.GAP_GROUP))
         row.add(self._ico("power", 28, T.DIM, T.G_POWER, tag="power"))
@@ -752,7 +787,8 @@ class Island(Gtk.Window):
                 R.Gap(18),
                 R.Bar(260, 10, self.sp_nivel, col),
                 R.Gap(16),
-                self._pct(cr, pct, T.F_TITLE, T.FG))
+                self._pct(cr, self._rodillo("nivel", "%d%%" % pct),
+                          T.F_TITLE, T.FG))
 
         if k == "power":
             on = d.get("charging")
@@ -990,7 +1026,8 @@ class Island(Gtk.Window):
                 R.Gap(22),
                 R.Slider(420, 12, self.sp_nivel, col, tag="vol-slider"),
                 R.Gap(20),
-                self._pct(cr, pct, T.F_TITLE, T.FG))
+                self._pct(cr, self._rodillo("nivel", "%d%%" % pct),
+                          T.F_TITLE, T.FG))
 
         if which == "battery":
             if not controls.epp_disponible():
@@ -2470,6 +2507,14 @@ class Island(Gtk.Window):
                   self.sp_hx, self.sp_hy, self.sp_hw, self.sp_hh, self.sp_ha,
                   self.sp_nivel):
             moving |= s.step(dt)
+        for c in self._cont.values():
+            if c.sp.step(dt):
+                moving = True
+            elif c.previo != c.actual:
+                # Al terminar, el valor viejo se olvida: mientras se
+                # recuerda, las casillas miden lo que el MAS ancho de
+                # los dos y la cifra se queda con un hueco delante.
+                c.previo = c.actual
 
         # Indicador de dictado. Se mira aparte del resto para enterarse
         # de CUANDO se asienta: mientras se desvanece sigue ocupando su
@@ -2657,8 +2702,17 @@ class Island(Gtk.Window):
 
         cr.reset_clip()
 
+    def _rodillo(self, nombre, texto):
+        """El contador de esa cifra, ya puesto al dia."""
+        c = self._cont.get(nombre)
+        if c is None:
+            c = self._cont[nombre] = Contador(texto)
+        elif c.set(texto):
+            self.ensure_tick()
+        return c
+
     @staticmethod
-    def _pct(cr, valor, fuente, color):
+    def _pct(cr, cont, fuente, color):
         """El porcentaje en un hueco de ancho FIJO y alineado a la
         derecha.
 
@@ -2672,8 +2726,9 @@ class Island(Gtk.Window):
         ancho de cada digito- y no pegaba con el resto de la isla, que
         es toda Inter.
         """
-        txt = R.Text("%d%%" % valor, fuente, color)
-        hueco = R.Text("100%", fuente, color).size(cr)[0] - txt.size(cr)[0]
+        txt = R.Rodillo(cont, fuente, color)
+        hueco = (R.Text("100%", fuente, color, feats=R.TNUM).size(cr)[0]
+                 - txt.size(cr)[0])
         return R.Row([R.Gap(max(0, hueco)), txt])
 
     def _mayusculas(self):
