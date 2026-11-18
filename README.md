@@ -506,6 +506,44 @@ island-send panel --target launcher
 island-send music --title "Midnight City" --artist "M83"
 ```
 
+**120 Hz, y por qué no salían solos.** La pantalla de este portátil va a 120
+y la isla pintaba a 60. No por falta de potencia: GTK3 reparte los fotogramas
+con su propio reloj, y ese va fijo a 60 aunque GDK sepa perfectamente que el
+monitor da 120. Medido con una ventana de prueba: GDK dice `120.00 Hz`,
+`add_tick_callback` entrega **60,2 fotogramas por segundo** y un temporizador
+de 8 ms entrega **119,3**.
+
+Así que el ritmo lo lleva un temporizador y el periodo sale del monitor
+(`theme.FPS = 0` para seguirlo, un número para fijarlo). Los muelles integran
+con el tiempo transcurrido, no con el número de fotogramas, así que la
+animación dura exactamente lo mismo a 60 que a 120: lo único que cambia es
+cuántas veces se mira por el camino.
+
+Pero con eso solo no bastaba. El bucle pasó a dar 117 vueltas por segundo y el
+dibujado seguía saliendo a 58: `queue_draw_area` encola, y GTK sirve lo
+pendiente a su reloj. O sea, se movían los muelles el doble de veces para
+enseñar la mitad. Ahora el fotograma se pinta en el acto con
+`begin_draw_frame`, que de paso se salta el doble búfer de GTK.
+
+Comparado con el código anterior, **bajo la misma carga** y midiendo CPU por
+fotograma, que es lo único que no depende de lo ocupada que esté la máquina:
+
+| | Fotogramas | CPU por fotograma |
+|---|---|---|
+| Antes (60 Hz, encolado) | 227 y 233 | 2,82 y 2,79 ms |
+| Ahora (120 Hz, directo) | 545 y 480 | 2,26 y 2,35 ms |
+
+Es decir: **2,2 veces más fotogramas y cada uno un 18% más barato**. En total,
+una animación cuesta ~1,9 veces más CPU que antes; eso es lo que vale el doble
+de fluidez, y `FPS = 60` lo devuelve si alguna vez molesta. Lo que no cambia es
+el reposo: el bucle sigue parándose en seco cuando los muelles se asientan.
+
+Con `ISLAND_DEBUG=1` la isla escribe cada segundo cuántas vueltas da, cuántas
+dibuja, lo que cuesta el fotograma medio y el peor, y cuántas veces reconstruye
+el contenido. Sin eso, «optimizar» es mover cosas de sitio: las tres primeras
+cosas que di por lentas --la onda del dictáfono, el margen de repintado, el
+tamaño del lienzo- no aparecían en la medida.
+
 **Coste en reposo.** El contenido se reconstruye 12 veces por minuto, no 72:
 el reloj muestra `HH:MM`, así que 59 de cada 60 refrescos no cambiaban un
 píxel. El bucle de animación se detiene del todo cuando los muelles se
