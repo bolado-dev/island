@@ -608,6 +608,20 @@ super + space
 	~/.config/island/dictado.py stop
 ```
 
+**Si no pasa nada al pulsarlo, mira quién más quiere esa tecla.** `ibus` se
+queda `super + space` para cambiar de método de entrada y la agarra **antes**
+que sxhkd, así que el atajo no llega a dispararse: no falla, es que no se
+ejecuta. Se libera con
+
+```sh
+gsettings set org.freedesktop.ibus.general.hotkey triggers "@as []"
+```
+
+y el cambio de método de entrada te sigue quedando en `Ctrl+space`. Me costó
+encontrarlo porque el síntoma es que no ocurre *nada*: el ayudante lanzado a
+mano funcionaba, las dependencias estaban, y `super + shift + space` --que ibus
+no toca- sí arrancaba.
+
 Si cambias de tecla, cámbiala también en `DICT_TECLA` (`config.py`): es la que
 el ayudante le pregunta a X para parar al soltarla. Va con el nombre que le da
 X y en minúsculas --`space`, no `Space`-, porque con la mayúscula
