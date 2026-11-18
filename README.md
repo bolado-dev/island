@@ -126,11 +126,39 @@ lo que se abre el lanzador el 95% de las veces. Y no toca el disco a
 propósito: por el portapapeles pasan contraseñas, y lo que no se guarda no se
 filtra.
 
+<p align="center">
+  <img src="docs/portapapeles.gif" alt="El panel del portapapeles con lo último copiado, cada línea con su tipo; al pulsar control y P la línea sube al principio con una chincheta azul, y al pulsar intro se pega en la ventana que había detrás" width="860">
+</p>
+
 **Y tiene panel propio en `super + v`**, como el de Windows: la lista de lo
 último copiado, numerada, con las flechas para moverte y `⏎` para pegarlo **en
 la ventana que tenías delante** --no en el portapapeles para que lo pegues tú-.
 Escribir filtra. Es el mismo historial que ve el lanzador, así que no hay dos
 listas que puedan discrepar.
+
+**Cada línea dice qué es**: URL, correo, ruta, color, comando, código, número o
+texto, con su glifo y su etiqueta en columna a la derecha. No se adivina el
+programa ni el lenguaje --son miles-, se mira la forma, que es lo que no cambia.
+Y lo que **es** código va en monoespaciada: en proporcional, la `l` y el `1` o la
+`O` y el `0` se confunden justo en lo único que hay que leer con precisión. Un
+párrafo de varias líneas no es código y sigue en proporcional.
+
+Un color **se enseña**, no se lee: si lo copiado es un `#rrggbb` sale su muestra.
+Y arriba va el contenido entero del seleccionado, hasta tres líneas, con su tipo,
+su tamaño y cuándo lo copiaste: es la diferencia entre ver 58 caracteres y ver
+lo que vas a pegar.
+
+Los números son atajos --`3` pega el tercero, y solo sin búsqueda activa, que si
+no escribir «3 cosas» en el filtro pegaría-, `⌦` olvida una entrada sin cerrar
+el panel y **`^P` la fija**: lo fijado sube al principio, lleva chincheta y deja
+de caerse cuando el historial se llena. Eso último es lo que lo hace útil para
+lo que repites veinte veces al día.
+
+Olvidar no toca el portapapeles del sistema: si borras justo lo último copiado
+sigue estando a un Ctrl+V, lo que se tira es el recuerdo. Y fijar tampoco toca
+el disco. Fijar es decir «esto lo voy a pegar varias veces», no «guárdame esto
+para siempre», y por el portapapeles pasan contraseñas: lo que no se escribe no
+se filtra.
 
 Lo que no sale ahí son las imágenes: el historial es de texto. Después de una
 captura, el portapapeles tiene un PNG y `xclip -o` devuelve bytes que no son

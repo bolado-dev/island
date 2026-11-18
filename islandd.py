@@ -1590,7 +1590,7 @@ class Island(Gtk.Window):
         # La ventana de destino, ANTES de capturar el teclado: es donde
         # va a caer lo que elijas, igual que en el selector de emoji.
         self.emo_destino = sources.ventana_enfocada()
-        self.port = {"q": "", "sel": 0, "res": list(self.portapapeles.items)}
+        self.port = {"q": "", "sel": 0, "res": self.portapapeles.lista()}
         self.activities["panel"] = Activity(
             "panel", 50, None, {"which": "portapapeles"}, "panel")
 
@@ -1635,8 +1635,8 @@ class Island(Gtk.Window):
             filas.append(self._port_fila(cr, i, txt, i == sel, ANCHO))
 
         filas.append(R.Row().add(R.Text(
-            "\u2191\u2193 mover \u00b7 1-9 pegar \u00b7 \u2326 olvidar "
-            "\u00b7 \u23ce pegar \u00b7 esc cerrar", T.F_SMALL, T.DIM2)))
+            "\u2191\u2193 mover \u00b7 1-9 pegar \u00b7 ^P fijar \u00b7 "
+            "\u2326 olvidar \u00b7 \u23ce pegar", T.F_SMALL, T.DIM2)))
         return R.Stack(filas, gap=10)
 
     @staticmethod
@@ -1683,6 +1683,8 @@ class Island(Gtk.Window):
         edad = sources.clip_edad(self.portapapeles.edad(txt))
         if edad:
             datos.append(edad)
+        if txt in self.portapapeles.fijados:
+            datos.append("fijado")
         return R.Stack([
             cuerpo,
             R.Row().add(R.Text(" \u00b7 ".join(datos), T.F_SMALL, T.DIM)),
@@ -1695,15 +1697,25 @@ class Island(Gtk.Window):
 
         # El numero no es adorno: es el atajo. Pulsar 3 pega el tercero
         # sin tener que bajar con las flechas.
-        num = R.Text("%d" % (i + 1), T.F_SMALL, T.ACCENT if activa else T.DIM2)
+        # La chincheta NO ocupa el sitio del numero: el numero es el
+        # atajo para pegar, y quitandoselo a la primera fila la lista
+        # empezaba en 2 y no habia forma de saber que tecla pegaba esa.
+        # Va junto a la etiqueta, que es donde se leen las propiedades
+        # de la fila.
+        fijo = txt in self.portapapeles.fijados
+        num = R.Text("%d" % (i + 1), T.F_SMALL,
+                     T.ACCENT if activa else T.DIM2)
         rgb = sources.clip_color(txt) if tipo == "color" else None
         cabeza = (R.Swatch(18, rgb) if rgb is not None
                   else self._ico(glifo, 20, T.DIM2 if not activa else T.DIM))
 
         una = " ".join(txt.split())
         cuerpo = R.Text(self._clip(una, 44), self._port_fuente(tipo), col)
-        etq = R.Text(etiqueta, T.F_SMALL, T.DIM2)
-        hueco = max(10, ancho - 2 * 12 - 16 - 20 - 3 * T.GAP_ITEM
+        etq = R.Row([self._ico(T.G_PIN, 16, T.ACCENT), R.Gap(8),
+                     R.Text(etiqueta, T.F_SMALL, T.DIM)]) if fijo \
+            else R.Text(etiqueta, T.F_SMALL, T.DIM2)
+        hueco = max(10, ancho - 2 * 12 - 20 - 3 * T.GAP_ITEM
+                    - num.size(cr)[0] - cabeza.size(cr)[0]
                     - cuerpo.size(cr)[0] - etq.size(cr)[0])
         fila = R.Row([num, R.Gap(T.GAP_ITEM), cabeza, R.Gap(T.GAP_ITEM),
                       cuerpo, R.Gap(hueco), etq])
@@ -1728,6 +1740,19 @@ class Island(Gtk.Window):
                     st["res"][min(st["sel"], len(st["res"]) - 1)])
                 st["res"] = self._port_res(st["q"])
                 st["sel"] = min(st["sel"], max(0, len(st["res"]) - 1))
+            self.refresh()
+            return True
+        if kv in (Gdk.KEY_p, Gdk.KEY_P) and (ev.state
+                                             & Gdk.ModifierType.CONTROL_MASK):
+            # Ctrl+P y no "p" a secas: las letras van al filtro. Fijar
+            # no cierra el panel, que lo normal es fijar y seguir
+            # mirando.
+            if st["res"]:
+                elegido = st["res"][min(st["sel"], len(st["res"]) - 1)]
+                self.portapapeles.fijar(elegido)
+                st["res"] = self._port_res(st["q"])
+                if elegido in st["res"]:
+                    st["sel"] = st["res"].index(elegido)
             self.refresh()
             return True
         if Gdk.KEY_1 <= kv <= Gdk.KEY_9 and not st["q"]:
@@ -1759,7 +1784,7 @@ class Island(Gtk.Window):
 
     def _port_res(self, q):
         if not q.strip():
-            return list(self.portapapeles.items)
+            return self.portapapeles.lista()
         return self.portapapeles.busca(q, T.PP_FILAS)
 
     def _port_sel(self):

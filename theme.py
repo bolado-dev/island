@@ -345,3 +345,6 @@ PP_TIPOS = {
     "texto":  ("", "Texto"),
 }
 PP_MONO = ("ruta", "cmd", "codigo", "color", "numero")
+# Chincheta de lo fijado. Rellena y en azul: es lo unico de la
+# lista que has decidido tu, el resto llega solo.
+G_PIN   = ""

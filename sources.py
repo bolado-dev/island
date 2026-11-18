@@ -462,6 +462,11 @@ class Portapapeles(object):
         # lista para no cambiarle la forma a quien ya la usa: el
         # lanzador espera cadenas y las sigue recibiendo.
         self.visto = {}
+        # Lo fijado. En memoria como todo lo demas: fijar es decir "esto
+        # lo voy a pegar varias veces", no "guardame esto para siempre",
+        # y por el portapapeles pasan contrasenas. Lo que no se escribe
+        # no se filtra.
+        self.fijados = set()
         self._ultimo = None
         if cada > 0:
             GLib.timeout_add_seconds(cada, self._tick)
@@ -482,10 +487,31 @@ class Portapapeles(object):
         self.items = [x for x in self.items if x != txt]
         self.items.insert(0, txt)
         self.visto[txt] = time.time()
-        for sobra in self.items[self.maximo:]:
+        # Al recortar, lo fijado NO cuenta ni se cae: para eso se fija.
+        # Si no, bastaban veinte copias para perder lo que habias
+        # apartado a proposito.
+        sueltos = [x for x in self.items if x not in self.fijados]
+        for sobra in sueltos[self.maximo:]:
+            self.items.remove(sobra)
             self.visto.pop(sobra, None)
-        del self.items[self.maximo:]
         return True
+
+    def fijar(self, txt):
+        """Fija o suelta. Devuelve si quedo fijado."""
+        if txt in self.fijados:
+            self.fijados.discard(txt)
+            return False
+        self.fijados.add(txt)
+        return True
+
+    def lista(self):
+        """Lo fijado primero y lo demas por orden de copiado.
+
+        El orden lo decide esto y no quien dibuja: asi el panel y el
+        lanzador no pueden acabar ensenando ordenes distintos.
+        """
+        fij = [x for x in self.items if x in self.fijados]
+        return fij + [x for x in self.items if x not in self.fijados]
 
     def borrar(self, txt):
         """Saca algo del historial. No toca el portapapeles del sistema:
@@ -493,6 +519,7 @@ class Portapapeles(object):
         Ctrl+V; lo que se tira es el recuerdo, no la copia."""
         self.items = [x for x in self.items if x != txt]
         self.visto.pop(txt, None)
+        self.fijados.discard(txt)
         if self._ultimo == txt:
             # Si no, al siguiente barrido lo ve igual que estaba y lo
             # vuelve a meter: habrias borrado algo que reaparece solo.
@@ -505,7 +532,7 @@ class Portapapeles(object):
 
     def busca(self, q, tope=3):
         ql = q.lower()
-        return [x for x in self.items if ql in x.lower()][:tope]
+        return [x for x in self.lista() if ql in x.lower()][:tope]
 
 
 # Tipos de cosa copiada. Un historial de portapapeles es una lista de
