@@ -42,6 +42,21 @@ except locale.Error:
     pass
 
 
+class _Fase(object):
+    """Lee self.anim en el momento de dibujar.
+
+    La fase del latido cambia en cada fotograma pero el contenido solo
+    se reconstruye cuando cambia de verdad; pasando este objeto en vez
+    del numero, el dibujado mira el valor de ESTE fotograma.
+    """
+    def __init__(self, isla):
+        self._isla = isla
+
+    @property
+    def value(self):
+        return self._isla.anim
+
+
 class Activity(object):
     """Algo que la isla muestra. 'pill' crece a lo ancho; 'card' crece
     tambien a lo alto y admite dos lineas."""
@@ -180,6 +195,9 @@ class Island(Gtk.Window):
         self._seat = None          # captura activa (puntero/teclado)
         self._dentro = False       # el raton, encima de la isla
         self._hover_r = R.HOVER_R  # forma del realce, la dice cada zona
+        # La fase del ciclo de 1,4 s, envuelta para que los dibujos la
+        # lean EN VIVO: el contenido no se reconstruye en cada fotograma.
+        self.sp_anim = _Fase(self)
         # Medidor. Sin numeros, "optimizar" es mover cosas de sitio: lo
         # que se mide es a cuantos fotogramas se va de verdad, cuanto
         # cuesta cada uno y cuantas veces se reconstruye el contenido,
@@ -1103,18 +1121,46 @@ class Island(Gtk.Window):
         if which == "wifi-pw":
             pw = self.pw or {}
             err = pw.get("error")
-            return R.Stack([
-                R.Row().add(
-                    self._ico("lock", 28, T.RED if err else T.ACCENT, T.G_LOCK),
-                    R.Gap(T.GAP_ITEM),
-                    R.Text(pw.get("ssid", ""), T.F_TITLE, T.FG)),
-                R.Row().add(R.Field(420, pw.get("text", ""), T.F_SUB, T.FG,
-                                    caret=self.caret_on, tag="pw-field")),
-                R.Row().add(R.Text(
-                    "Contrase\u00f1a incorrecta \u00b7 reint\u00e9ntalo" if err
-                    else "Intro para conectar \u00b7 Esc para cancelar",
-                    T.F_SMALL, T.RED if err else T.DIM2)),
-            ], gap=T.GAP_ROW, center=True)
+            cab = R.Row().add(
+                self._ico("lock", 28, T.RED if err else T.ACCENT, T.G_LOCK),
+                R.Gap(T.GAP_ITEM),
+                R.Text(pw.get("ssid", ""), T.F_TITLE, T.FG))
+
+            if pw.get("estado") == "conectando":
+                # Mientras nmcli trabaja. La barra NO tiene progreso
+                # porque nmcli no lo da: fingir un 60% seria inventarse
+                # un dato. Lo que dice es "sigo", que es lo que se sabe.
+                return R.Stack([
+                    cab,
+                    R.Row().add(R.BarIndef(420, 8, self.sp_anim, T.ACCENT)),
+                    R.Row().add(R.Text("Conectando\u2026", T.F_SMALL, T.DIM)),
+                ], gap=T.GAP_ROW, center=True)
+
+            ver = bool(pw.get("ver"))
+            campo = R.Row().add(
+                R.Field(380, pw.get("text", ""), T.F_SUB, T.FG,
+                        caret=self.caret_on, secret=not ver, tag="pw-field"),
+                R.Gap(T.GAP_ITEM),
+                # El ojo no es decoracion: una contrasena de wifi se
+                # teclea de un papel y sin verla no hay forma de saber
+                # si el fallo fue tuyo o del papel.
+                R.Row([self._ico("ojo-no" if ver else "ojo", 24,
+                                 T.ACCENT if ver else T.DIM,
+                                 T.G_OJO_NO if ver else T.G_OJO)],
+                      tag="pw-ver"))
+
+            if err:
+                pie = R.Text("Contrase\u00f1a incorrecta \u00b7 reint\u00e9ntalo",
+                             T.F_SMALL, T.RED)
+            elif self._mayusculas():
+                # Avisar de esto es la diferencia entre una errata y diez
+                # minutos de "pero si es la buena".
+                pie = R.Text("Bloq May\u00fas activado", T.F_SMALL, T.ORANGE)
+            else:
+                pie = R.Text("\u23ce conectar \u00b7 ^H ver \u00b7 esc cancelar",
+                             T.F_SMALL, T.DIM2)
+            return R.Stack([cab, campo, R.Row().add(pie)],
+                           gap=T.GAP_ROW, center=True)
 
         # ---- wifi
         nets = self.wifi_nets
@@ -2067,7 +2113,8 @@ class Island(Gtk.Window):
     # ------------------------------------------------- campo de contrasena
 
     def _start_pw(self, ssid):
-        self.pw = {"ssid": ssid, "text": "", "error": False}
+        self.pw = {"ssid": ssid, "text": "", "error": False,
+                   "ver": False, "estado": ""}
         self.activities["panel"] = Activity(
             "panel", 50, None, {"which": "wifi-pw"}, "panel")
 
@@ -2134,14 +2181,37 @@ class Island(Gtk.Window):
         if self.pw is None:
             return False
         kv = ev.keyval
+        if self.pw.get("estado") == "conectando":
+            # Mientras conecta solo se admite rendirse: escribir ahi no
+            # llevaria a ninguna parte y Intro lanzaria un segundo
+            # nmcli contra la misma red.
+            if kv == Gdk.KEY_Escape:
+                self._close_panel()
+                self.refresh()
+            return True
+        if kv in (Gdk.KEY_Caps_Lock, Gdk.KEY_Shift_Lock):
+            # Se repinta para que el aviso aparezca o desaparezca en el
+            # acto: es un estado del teclado, no del campo.
+            self.refresh()
+            return True
+        if kv in (Gdk.KEY_h, Gdk.KEY_H) and (ev.state
+                                             & Gdk.ModifierType.CONTROL_MASK):
+            self.pw["ver"] = not self.pw.get("ver")
+            self.refresh()
+            return True
         if kv == Gdk.KEY_Escape:
             self._close_panel()
             self.refresh()
         elif kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             ssid, text = self.pw["ssid"], self.pw["text"]
             if text:
-                self._close_panel()
+                # El panel NO se cierra: se queda enseñando que esta
+                # conectando. Cerrarlo y avisar al final dejaba varios
+                # segundos sin saber si se habia enterado.
+                self.pw["estado"] = "conectando"
+                self.pw["error"] = False
                 self.refresh()
+                self.ensure_tick()
                 controls.wifi_connect_pw(ssid, text, self._after_wifi)
         elif kv == Gdk.KEY_BackSpace:
             self.pw["text"] = self.pw["text"][:-1]
@@ -2452,6 +2522,10 @@ class Island(Gtk.Window):
         # pantalla hay que seguir pidiendo fotogramas.
         if act is not None and act.kind == "power" and act.data.get("charging"):
             moving = True
+        # Conectando a una red: la barra indeterminada no se asienta
+        # nunca, va y viene mientras dure nmcli.
+        if self.pw is not None and self.pw.get("estado") == "conectando":
+            moving = True
         # Mientras se dicta tampoco se asienta nada: la onda la mueve el
         # microfono y los puntos de "transcribiendo" laten solos.
         if act is not None and act.kind == "dictado" and \
@@ -2560,6 +2634,7 @@ class Island(Gtk.Window):
             pw = getattr(self, "_pw", 0.0) or self.prev_content.size(cr)[0]
             cr.save()
             cr.translate(0, -10 * f)
+            self._encaja(cr, pw, x, w, cy)
             self.prev_content.draw(cr, x + (w - pw) / 2.0, cy, 1.0 - f)
             cr.restore()
 
@@ -2572,10 +2647,49 @@ class Island(Gtk.Window):
             cw = getattr(self, "_cw", 0.0) or self.content.size(cr)[0]
             cr.save()
             cr.translate(0, 10 * (1.0 - f))
+            self._encaja(cr, cw, x, w, cy)
             self.content.draw(cr, x + (w - cw) / 2.0, cy, f)
             cr.restore()
 
         cr.reset_clip()
+
+    def _mayusculas(self):
+        """Si Bloq Mayus esta puesto AHORA. Se pregunta a GDK en vez de
+        recordarlo: la tecla puede pulsarse con el panel abierto o venir
+        puesta de antes."""
+        try:
+            km = Gdk.Keymap.get_for_display(self.get_display())
+            return bool(km.get_caps_lock_state())
+        except Exception:
+            return False
+
+    @staticmethod
+    def _encaja(cr, ancho_contenido, x_isla, ancho_isla, cy):
+        """Encoge el contenido mientras la forma no le llega.
+
+        La forma se mueve con un muelle y el contenido se construia ya a
+        su tamano final, asi que durante el crecimiento se dibujaba algo
+        de 600 px dentro de una capsula de 300: como el dibujado va
+        recortado a la forma, el texto salia partido por los lados.
+
+        Escalandolo por lo que CABE, el texto y la forma van parejos: ni
+        se sale ni aparece de golpe al final. El factor sube a 1 en
+        cuanto la isla alcanza su tamano, asi que en reposo no hay
+        ninguna escala puesta y el texto se dibuja nitido.
+        """
+        if ancho_contenido <= 0:
+            return
+        util = max(0.0, ancho_isla - 2 * T.PAD_PILL)
+        k = max(T.ENCAJE_MIN, min(1.0, util / float(ancho_contenido)))
+        if k > 0.999:
+            return
+        # El centro de la ISLA en coordenadas de pantalla, no el de
+        # la ventana: el contenido esta centrado ahi, y escalando
+        # alrededor de otro punto se arrastraria hacia un lado.
+        cx = x_isla + ancho_isla / 2.0
+        cr.translate(cx, cy)
+        cr.scale(k, k)
+        cr.translate(-cx, -cy)
 
     def update_input_region(self):
         """Solo la capsula recibe clics; el resto de la ventana deja
@@ -2713,6 +2827,9 @@ class Island(Gtk.Window):
             if n < len(cats):
                 self._emo_ir(cats[n][1])
             self.refresh()
+        elif tag == "pw-ver" and self.pw is not None:
+            self.pw["ver"] = not self.pw.get("ver")
+            self.refresh()
         elif tag.startswith("cap:"):
             self._captura_accion(tag[4:])
         elif tag.startswith("pp:"):
@@ -2764,7 +2881,7 @@ class Island(Gtk.Window):
                 or tag == "dnd" or tag.startswith("ws")
                 or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
                                    "ds:", "media:", "emo:", "cap:", "pp:",
-                                   "cat:")))
+                                   "cat:")) or tag == "pw-ver")
 
     def _set_cursor(self, pointer):
         if pointer == self._cursor_ptr:
@@ -2891,6 +3008,8 @@ class Island(Gtk.Window):
 
     def _after_wifi(self, ok, ssid, msg=""):
         self.sys.refresh()
+        if self.pw is not None:
+            self.pw["estado"] = ""
         if not ok and msg == "bad-password":
             # Se vuelve al campo con el aviso en vez de cerrar: reabrir
             # el panel y buscar otra vez la red seria un castigo por
@@ -2900,6 +3019,11 @@ class Island(Gtk.Window):
                 self.pw["error"] = True
                 self.refresh()
             return False
+        # Ahora el panel sigue abierto mientras nmcli trabaja, asi que
+        # hay que cerrarlo al terminar: antes se cerraba al pulsar Intro
+        # y aqui no quedaba nada que cerrar.
+        if self.pw is not None:
+            self._close_panel()
         self.on_event({
             "kind": "notify", "app": "Wi-Fi",
             "body": ("Conectado a %s" % ssid) if ok

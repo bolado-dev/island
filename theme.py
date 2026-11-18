@@ -404,3 +404,12 @@ WIFI_GAP   = 2
 # aparato no sabe donde esta.
 SP_NIVEL_RESP = 0.26
 SP_NIVEL_DAMP = 1.0
+
+# Cuanto puede encoger el contenido mientras la isla crece hacia su
+# tamano. Por debajo de esto no baja: un texto al 40% no se lee, y lo
+# que se quiere es que acompane a la forma, no que desaparezca.
+ENCAJE_MIN = 0.62
+
+# Ojo abierto y tachado, para ver u ocultar la contrasena del wifi.
+G_OJO    = ""
+G_OJO_NO = ""

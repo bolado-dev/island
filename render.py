@@ -378,6 +378,38 @@ class Stack(object):
             y += rh + self.gap
 
 
+class BarIndef(object):
+    """Barra de progreso SIN progreso: un segmento que va y viene.
+
+    Para esperas que no saben cuanto van a durar, como conectarse a una
+    red: nmcli no informa de por donde va, asi que una barra que se
+    llenara al 60% estaria inventandose un dato. Esto dice "sigo", que
+    es lo unico que se sabe de verdad.
+    """
+    def __init__(self, w, h, fase, color, bg=T.SURF_2, trozo=0.32):
+        self.w, self.h, self.fase = w, h, fase
+        self.color, self.bg, self.trozo = color, bg, trozo
+
+    def size(self, cr):
+        return self.w, self.h
+
+    def draw(self, cr, x, cy, a):
+        y = cy - self.h / 2.0
+        capsule(cr, x, y, self.w, self.h)
+        cr.set_source_rgba(*self.bg, a)
+        cr.fill()
+        # Ida y vuelta con el mismo ciclo que ya late en la isla: en vez
+        # de dar la vuelta y reaparecer por el otro lado --que se lee
+        # como un salto- rebota en los extremos.
+        f = (self.fase.value if hasattr(self.fase, "value") else self.fase) % 1.0
+        t = 2.0 * f if f < 0.5 else 2.0 * (1.0 - f)
+        seg = self.w * self.trozo
+        cx = (self.w - seg) * t
+        capsule(cr, x + cx, y, seg, self.h)
+        cr.set_source_rgba(*self.color, a)
+        cr.fill()
+
+
 class Slider(object):
     """Barra arrastrable (volumen, brillo).
 
