@@ -417,8 +417,3 @@ ENCAJE_MIN = 0.62
 # Ojo abierto y tachado, para ver u ocultar la contrasena del wifi.
 G_OJO    = ""
 G_OJO_NO = ""
-
-# Monoespaciada grande, para cifras que cambian solas (el porcentaje de
-# volumen y brillo). En proporcional, cada digito mide distinto y el
-# simbolo de porcentaje baila mientras subes la rueda.
-F_MONO_BIG = ("Iosevka Nerd Font", "medium", 26)

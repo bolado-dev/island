@@ -752,7 +752,7 @@ class Island(Gtk.Window):
                 R.Gap(18),
                 R.Bar(260, 10, self.sp_nivel, col),
                 R.Gap(16),
-                self._pct(cr, pct, T.F_MONO_BIG, T.FG))
+                self._pct(cr, pct, T.F_TITLE, T.FG))
 
         if k == "power":
             on = d.get("charging")
@@ -990,7 +990,7 @@ class Island(Gtk.Window):
                 R.Gap(22),
                 R.Slider(420, 12, self.sp_nivel, col, tag="vol-slider"),
                 R.Gap(20),
-                self._pct(cr, pct, T.F_MONO_BIG, T.FG))
+                self._pct(cr, pct, T.F_TITLE, T.FG))
 
         if which == "battery":
             if not controls.epp_disponible():
@@ -2662,12 +2662,15 @@ class Island(Gtk.Window):
         """El porcentaje en un hueco de ancho FIJO y alineado a la
         derecha.
 
-        Dos problemas de una vez. El ancho: "5%" mide 40 px y "100%" 68,
-        asi que la isla se reajustaba en CADA paso de volumen --crecia y
-        encogia mientras subes la rueda-. Y la posicion: con una fuente
-        proporcional, el simbolo de porcentaje bailaba al cambiar las
-        cifras. Monoespaciada y pegado a la derecha, el % no se mueve ni
-        un pixel y el hueco siempre mide lo que mide "100%".
+        "5%" mide 40 px y "100%" 68, asi que la isla se reajustaba en
+        CADA paso de volumen: crecia y encogia mientras subes la rueda.
+        Reservando siempre lo que mide "100%", el ancho no se mueve.
+
+        Y pegado a la derecha, no centrado: asi el simbolo de porcentaje
+        se queda clavado y lo que crece hacia la izquierda son las
+        cifras. Se probo con una monoespaciada --que ademas iguala el
+        ancho de cada digito- y no pegaba con el resto de la isla, que
+        es toda Inter.
         """
         txt = R.Text("%d%%" % valor, fuente, color)
         hueco = R.Text("100%", fuente, color).size(cr)[0] - txt.size(cr)[0]
