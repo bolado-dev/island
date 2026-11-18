@@ -179,6 +179,13 @@ class Island(Gtk.Window):
         self._blink_id = None
         self._seat = None          # captura activa (puntero/teclado)
         self._dentro = False       # el raton, encima de la isla
+        # Medidor. Sin numeros, "optimizar" es mover cosas de sitio: lo
+        # que se mide es a cuantos fotogramas se va de verdad, cuanto
+        # cuesta cada uno y cuantas veces se reconstruye el contenido,
+        # que es lo caro. Solo con ISLAND_DEBUG.
+        self._prof = {"tick": 0, "draw": 0, "ms": 0.0, "max": 0.0,
+                      "refresh": 0}
+        self._per_ms = None        # periodo de fotograma, se calcula al usar
         self._grab_guard = None
         # Mas rapidos que los de la isla (0.38-0.50): el hover tiene que
         # sentirse inmediato, no "animado". Amortiguacion alta para que
@@ -195,6 +202,9 @@ class Island(Gtk.Window):
         self.sp_rec = Spring(0.0, response=0.34, damping=0.70)
         self._cursor_ptr = None
         self.fifo = sources.Fifo(sources.FIFO, self.on_event)
+
+        if os.environ.get("ISLAND_DEBUG"):
+            GLib.timeout_add_seconds(1, self._prof_dump)
 
         # Un unico temporizador de 1 s para reloj y enchufe: dos
         # separados despertaban el proceso el doble de veces para hacer
@@ -261,12 +271,27 @@ class Island(Gtk.Window):
     def _tick_1s(self):
         self._poll_power()
         self._tick_clock()
-        if os.environ.get("ISLAND_DEBUG"):
-            self._secs = getattr(self, "_secs", 0) + 1
-            if self._secs % 60 == 0:
-                print("reconstrucciones de contenido en 60s: %d"
-                      % getattr(self, "_nrefresh", 0), flush=True)
-                self._nrefresh = 0
+        return True
+
+    def _prof_dump(self):
+        p = self._prof
+        if p["tick"] or p["draw"]:
+            try:
+                carpeta = os.path.join(
+                    os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
+                    "island-dictado")
+                os.makedirs(carpeta, exist_ok=True)
+                with open(os.path.join(carpeta, "traza.log"), "a") as f:
+                    f.write("perf: %3d tick/s  %3d draw/s  %5.2f ms medio"
+                            "  %5.2f ms peor  %3d refresh/s\n"
+                            % (p["tick"], p["draw"],
+                               p["ms"] / max(1, p["draw"]), p["max"],
+                               p["refresh"]))
+            except OSError:
+                pass
+        for k in p:
+            p[k] = 0 if k != "ms" else 0.0
+        p["max"] = 0.0
         return True
 
     def _tick_clock(self):
@@ -372,7 +397,13 @@ class Island(Gtk.Window):
 
     def _on_fin_ia(self, ia, app, segundos):
         if os.environ.get("ISLAND_DEBUG"):
-            print("fin-ia: %s tras %.0fs" % (app, segundos), flush=True)
+            # 'segundos' puede ser None a proposito: si no se vio
+            # empezar el trabajo, no se inventa un numero. La traza
+            # tenia que saberlo y no lo sabia, asi que reventaba justo
+            # en el caso que el aviso contempla.
+            print("fin-ia: %s tras %s" % (
+                app, "?" if segundos is None else "%.0fs" % segundos),
+                flush=True)
         self.activities["fin-ia"] = Activity(
             "fin-ia", 55, 8.0,
             {"ia": ia, "app": app, "segundos": segundos}, "card")
@@ -1295,7 +1326,7 @@ class Island(Gtk.Window):
         # pulsar el atajo.
         self._grab_retry(Gdk.SeatCapabilities.KEYBOARD
                          | Gdk.SeatCapabilities.ALL_POINTING, fallo)
-        self._blink_id = GLib.timeout_add(530, self._blink)
+        self._blink_on()
         self.refresh()
 
     def _launch_sel(self):
@@ -1396,7 +1427,7 @@ class Island(Gtk.Window):
 
         self._grab_retry(Gdk.SeatCapabilities.KEYBOARD
                          | Gdk.SeatCapabilities.ALL_POINTING, fallo)
-        self._blink_id = GLib.timeout_add(530, self._blink)
+        self._blink_on()
         self.refresh()
 
     def _emo_vista(self):
@@ -1661,7 +1692,7 @@ class Island(Gtk.Window):
 
         self._grab_retry(Gdk.SeatCapabilities.KEYBOARD
                          | Gdk.SeatCapabilities.ALL_POINTING, fallo)
-        self._blink_id = GLib.timeout_add(530, self._blink)
+        self._blink_on()
         self.refresh()
 
     def build_port(self, cr):
@@ -1998,10 +2029,7 @@ class Island(Gtk.Window):
         self.launch = None
         self.emo = None
         self.port = None
-        b = getattr(self, "_blink_id", None)
-        if b:
-            GLib.source_remove(b)
-            self._blink_id = None
+        self._blink_off()
         self._ungrab()
         self.activities.pop("panel", None)
 
@@ -2025,13 +2053,43 @@ class Island(Gtk.Window):
 
         self._grab_retry(Gdk.SeatCapabilities.KEYBOARD
                          | Gdk.SeatCapabilities.ALL_POINTING, fallo)
-        self._blink_id = GLib.timeout_add(530, self._blink)
+        self._blink_on()
         self.refresh()
 
+    def _blink_on(self):
+        """Arranca el parpadeo del cursor, cancelando el anterior.
+
+        Cancelar primero no es limpieza: abrir un panel con otro ya
+        abierto dejaba vivo el temporizador viejo, y con dos el cursor
+        parpadeaba al doble. Ademas _blink_id es una sola casilla, asi
+        que el segundo pisaba al primero y el primero, al quitarse solo
+        mas tarde, borraba la casilla del segundo. De ahi los avisos de
+        GLib al cerrar un panel.
+        """
+        self._blink_off()
+        self.caret_on = True
+        self._blink_id = GLib.timeout_add(530, self._blink)
+
+    def _blink_off(self):
+        if self._blink_id is not None:
+            GLib.source_remove(self._blink_id)
+            self._blink_id = None
+
     def _blink(self):
+        """Parpadeo del cursor de los campos de texto.
+
+        La lista de paneles con campo tiene que estar COMPLETA: se
+        quedo en el lanzador y el wifi, asi que en el selector de emoji
+        y en el portapapeles el cursor se congelaba al primer parpadeo,
+        porque el temporizador se quitaba solo al devolver False.
+        """
         self.caret_on = not self.caret_on
         self._damage()
-        return self.pw is not None or self.launch is not None
+        vivo = any(x is not None for x in (self.pw, self.launch,
+                                           self.emo, self.port))
+        if not vivo:
+            self._blink_id = None      # se quita solo: la casilla tambien
+        return vivo
 
     def on_key(self, widget, ev):
         if self._seat is not None:
@@ -2112,8 +2170,7 @@ class Island(Gtk.Window):
     # ------------------------------------------------------------ estado
 
     def refresh(self, initial=False):
-        if os.environ.get("ISLAND_DEBUG"):
-            self._nrefresh = getattr(self, "_nrefresh", 0) + 1
+        self._prof["refresh"] += 1
         cr = self._measure_ctx()
         key, mode, item = self.build(cr)
         w, h = item.size(cr)
@@ -2134,6 +2191,7 @@ class Island(Gtk.Window):
         if key != self.state_key:
             # Cambio de estado: cruza el contenido viejo con el nuevo.
             self.prev_content = self.content
+            self._pw = getattr(self, "_cw", 0.0)
             # Las zonas del contenido anterior desaparecen con el; dejar
             # el realce vivo lo haria quedarse flotando sobre nada.
             self.hover = None
@@ -2142,6 +2200,12 @@ class Island(Gtk.Window):
             self.sp_fade.set(1.0)
             self.state_key = key
         self.content = item
+        # El ancho ya se acaba de medir aqui: guardarlo evita que el
+        # dibujado vuelva a recorrer el arbol entero en CADA fotograma
+        # para saber donde centrarlo. A 120 Hz eso son 120 recorridos
+        # por segundo de algo que solo cambia cuando cambia el
+        # contenido.
+        self._cw = w
 
         if self.activities:
             self._mostrar()
@@ -2210,15 +2274,66 @@ class Island(Gtk.Window):
         w = max(cw, self._prev_dmg[0])
         h = max(ch, self._prev_dmg[1])
         self._prev_dmg = (cw, ch)
-        self.queue_draw_area(int((self.W - w) / 2), 0,
-                             int(w) + 1, int(h) + 1)
+        rect = cairo.RectangleInt(int((self.W - w) / 2), 0,
+                                  int(w) + 1, int(h) + 1)
+
+        # Se pinta YA, sin pasar por la cola de GTK.
+        #
+        # Encolando el repintado (queue_draw_area), el bucle corria a
+        # 120 y el dibujado seguia saliendo a 60: GTK agrupa lo
+        # pendiente y lo sirve a su reloj de fotogramas, que en GTK3 son
+        # 60 fijos. Se movian los muelles el doble de veces para ensenar
+        # la mitad; medido, 117 vueltas por segundo y 58 dibujados.
+        #
+        # begin_draw_frame y no process_updates, que hace lo mismo pero
+        # esta obsoleto desde GTK 3.22.
+        gw = self.get_window()
+        if gw is None:
+            return
+        try:
+            ctx = gw.begin_draw_frame(cairo.Region(rect))
+        except Exception:
+            # Si el compositor no deja pintar ahora, se encola y que lo
+            # sirva GTK cuando pueda: mas vale un fotograma tarde que
+            # una excepcion en mitad de la animacion.
+            self.queue_draw_area(rect.x, rect.y, rect.width, rect.height)
+            return
+        try:
+            cr = ctx.get_cairo_context()
+            cr.rectangle(rect.x, rect.y, rect.width, rect.height)
+            cr.clip()
+            self.on_draw(self, cr)
+        finally:
+            gw.end_draw_frame(ctx)
+
+    def _periodo_ms(self):
+        """Milisegundos entre fotogramas, segun el monitor.
+
+        Se calcula una vez. GLib solo acepta milisegundos enteros, asi
+        que 120 Hz son 8 y no 8,33: salen ~119 fotogramas por segundo,
+        que es un 0,5% de mas y lo tira el compositor. Pedir 9 daria
+        111, que si se nota.
+        """
+        if self._per_ms is None:
+            hz = float(T.FPS)
+            if hz <= 0:
+                try:
+                    pant = self.get_display().get_monitor_at_window(
+                        self.get_window()) or self.get_display().get_monitor(0)
+                    hz = (pant.get_refresh_rate() or 60000) / 1000.0
+                except Exception:
+                    hz = 60.0
+            self._per_ms = max(1, int(round(1000.0 / max(1.0, hz))))
+        return self._per_ms
 
     def ensure_tick(self):
         if self._tick_id is None:
             self._last = time.monotonic()
-            self._tick_id = self.add_tick_callback(self._on_tick)
+            self._tick_id = GLib.timeout_add(self._periodo_ms(),
+                                             self._on_tick, None, None)
 
     def _on_tick(self, widget, clock):
+        self._prof["tick"] += 1
         now = time.monotonic()
         dt = now - self._last
         self._last = now
@@ -2346,6 +2461,16 @@ class Island(Gtk.Window):
         self._hide_id = GLib.timeout_add(ms or T.HIDE_MS, self._quiza_ocultar)
 
     def on_draw(self, widget, cr):
+        t0 = time.monotonic()
+        self._dibuja(cr)
+        ms = (time.monotonic() - t0) * 1000.0
+        self._prof["draw"] += 1
+        self._prof["ms"] += ms
+        if ms > self._prof["max"]:
+            self._prof["max"] = ms
+        return False
+
+    def _dibuja(self, cr):
         cr.set_operator(cairo.OPERATOR_SOURCE)
         cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
@@ -2376,7 +2501,7 @@ class Island(Gtk.Window):
         # el mismo gesto que usa iOS al cambiar de actividad y hace que
         # el cruce se lea como un relevo, no como un parpadeo.
         if self.prev_content is not None and f < 0.999:
-            pw, _ = self.prev_content.size(cr)
+            pw = getattr(self, "_pw", 0.0) or self.prev_content.size(cr)[0]
             cr.save()
             cr.translate(0, -10 * f)
             self.prev_content.draw(cr, x + (w - pw) / 2.0, cy, 1.0 - f)
@@ -2388,14 +2513,13 @@ class Island(Gtk.Window):
         # algo que el usuario ya no ve.
         R.begin_hits()
         if self.content is not None:
-            cw, _ = self.content.size(cr)
+            cw = getattr(self, "_cw", 0.0) or self.content.size(cr)[0]
             cr.save()
             cr.translate(0, 10 * (1.0 - f))
             self.content.draw(cr, x + (w - cw) / 2.0, cy, f)
             cr.restore()
 
         cr.reset_clip()
-        return False
 
     def update_input_region(self):
         """Solo la capsula recibe clics; el resto de la ventana deja

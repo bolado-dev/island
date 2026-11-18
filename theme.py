@@ -156,6 +156,22 @@ POP_ALFA_MIN = 0.30
 # lineas seleccionado, el panel llega a 634, asi que 620 lo cortaba.
 WIN_H     = 700
 
+# --------------------------------------------------------------- ritmo
+# Fotogramas por segundo. 0 = los que dé el monitor, que es lo que
+# quieres casi siempre.
+#
+# No se usa el reloj de fotogramas de GTK (add_tick_callback) aunque
+# seria lo natural: en GTK3 va clavado a 60 aunque el monitor sea de
+# 120. Medido en esta maquina con una ventana de prueba: GDK dice
+# "120.00 Hz" y el reloj entrega 60,2 fotogramas por segundo; un
+# temporizador de 8 ms entrega 119,3. Asi que el ritmo lo lleva un
+# temporizador y el periodo sale del monitor.
+#
+# Los muelles integran con el tiempo real transcurrido, asi que la
+# animacion dura lo mismo a 60 que a 120: lo unico que cambia es
+# cuantas veces se mira por el camino.
+FPS = 0
+
 # --------------------------------------------------------------- fuentes
 # (familia, peso, px). El peso va aparte en vez de pegado al nombre
 # ("Inter Display SemiBold") porque asi Pango escoge el corte dentro de
