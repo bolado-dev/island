@@ -152,7 +152,9 @@ POP_ALFA_MIN = 0.30
 # La ventana sobrante es transparente y deja pasar
 # los clics, asi que pasarse no tiene coste visual; el de dibujado se
 # evita redibujando solo la zona de la isla (ver _damage en islandd).
-WIN_H     = 620
+# Con el historial del portapapeles y un fragmento de codigo de tres
+# lineas seleccionado, el panel llega a 634, asi que 620 lo cortaba.
+WIN_H     = 700
 
 # --------------------------------------------------------------- fuentes
 # (familia, peso, px). El peso va aparte en vez de pegado al nombre
@@ -317,4 +319,29 @@ CAP_ACTS = [
 # WIN_H y son las que de verdad se recuerdan; para mas abajo esta
 # escribir dos letras y filtrar.
 PP_FILAS = 6
+# Lineas del destacado: lo mismo que el dictado, y por el mismo motivo.
+# A partir de tres deja de ser un vistazo y se vuelve un documento; y lo
+# que no cabe se lee mejor pegandolo que ahi.
+PP_LINEAS = 3
 G_CLIP   = ""
+
+# Monoespaciada para lo que ES codigo: una ruta, un comando, un color.
+# No es decoracion: en proporcional, l y 1 o O y 0 se confunden justo
+# en lo unico que hay que leer con precision.
+F_MONO   = ("Iosevka Nerd Font", "normal", 21)
+
+# Que clase de cosa es cada linea: glifo y etiqueta. Saberlo de un
+# vistazo es la diferencia entre leer la lista entera y encontrar lo
+# que buscas.
+PP_TIPOS = {
+    "url":    ("", "URL"),
+    "correo": ("", "Correo"),
+    "ruta":   ("", "Ruta"),
+    "color":  ("", "Color"),
+    "cmd":    ("", "Comando"),
+    "numero": ("", "Número"),
+    "codigo": ("", "C\u00f3digo"),
+    "lineas": ("", "Varias lineas"),
+    "texto":  ("", "Texto"),
+}
+PP_MONO = ("ruta", "cmd", "codigo", "color", "numero")

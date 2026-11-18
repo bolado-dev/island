@@ -217,6 +217,34 @@ class Thumb(object):
         cr.stroke()
 
 
+class Swatch(object):
+    """Cuadrado de color con las esquinas redondeadas.
+
+    Para un #rrggbb del portapapeles: el nombre de un color no dice
+    nada y el color si. Cuadrado y no circulo porque es una MUESTRA de
+    pintura, no un indicador de estado --que es lo que son los puntos
+    de esta barra-, y conviene que no se confundan.
+    """
+    def __init__(self, lado, color, tag=None):
+        self.lado, self.color, self.tag = lado, color, tag
+
+    def size(self, cr):
+        return self.lado, self.lado
+
+    def draw(self, cr, x, cy, a):
+        y = cy - self.lado / 2.0
+        if self.tag:
+            _record(self.tag, x, cy, self.lado, self.lado)
+        capsule(cr, x, y, self.lado, self.lado, self.lado * 0.28)
+        cr.set_source_rgba(*self.color, a)
+        cr.fill_preserve()
+        # Un filo claro: un color oscuro sobre el negro de la isla seria
+        # un agujero y no una muestra.
+        cr.set_source_rgba(1, 1, 1, 0.22 * a)
+        cr.set_line_width(1.0)
+        cr.stroke()
+
+
 class Dot(object):
     """Punto de actividad. Es el recurso que usa iOS para 'hay algo en
     marcha en segundo plano'."""

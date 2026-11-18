@@ -9,6 +9,7 @@ es justo lo que se intenta evitar.
 import ctypes
 import os
 import json
+import re
 import time
 import subprocess
 import glob
@@ -457,6 +458,10 @@ class Portapapeles(object):
     def __init__(self, maximo=20, cada=3, limite=4096):
         self.maximo, self.limite = maximo, limite
         self.items = []            # el mas reciente primero
+        # Cuando se vio cada cosa. En un diccionario aparte y no en la
+        # lista para no cambiarle la forma a quien ya la usa: el
+        # lanzador espera cadenas y las sigue recibiendo.
+        self.visto = {}
         self._ultimo = None
         if cada > 0:
             GLib.timeout_add_seconds(cada, self._tick)
@@ -476,12 +481,114 @@ class Portapapeles(object):
         # Repetido: sube al principio en vez de duplicarse.
         self.items = [x for x in self.items if x != txt]
         self.items.insert(0, txt)
+        self.visto[txt] = time.time()
+        for sobra in self.items[self.maximo:]:
+            self.visto.pop(sobra, None)
         del self.items[self.maximo:]
         return True
+
+    def borrar(self, txt):
+        """Saca algo del historial. No toca el portapapeles del sistema:
+        si lo que borras es justo lo ultimo copiado, sigue estando a un
+        Ctrl+V; lo que se tira es el recuerdo, no la copia."""
+        self.items = [x for x in self.items if x != txt]
+        self.visto.pop(txt, None)
+        if self._ultimo == txt:
+            # Si no, al siguiente barrido lo ve igual que estaba y lo
+            # vuelve a meter: habrias borrado algo que reaparece solo.
+            self._ultimo = None
+
+    def edad(self, txt):
+        """Segundos desde que se copio, o None si no se sabe."""
+        t = self.visto.get(txt)
+        return None if t is None else max(0.0, time.time() - t)
 
     def busca(self, q, tope=3):
         ql = q.lower()
         return [x for x in self.items if ql in x.lower()][:tope]
+
+
+# Tipos de cosa copiada. Un historial de portapapeles es una lista de
+# cadenas sueltas y todas se parecen; saber de un vistazo que una es una
+# URL, otra un comando y otra un color es la diferencia entre leerlas
+# una a una y encontrar la que buscas.
+#
+# El orden importa: se devuelve el PRIMERO que casa, asi que lo mas
+# especifico va arriba. Un color es tambien texto, y una ruta tambien.
+_RE_COLOR  = re.compile(r"^#[0-9a-fA-F]{3,8}$|^rgba?\([\d\s.,%]+\)$")
+_RE_URL    = re.compile(r"^(https?://|www\.)\S+$|^[\w.-]+\.[a-z]{2,}(/\S*)?$",
+                        re.I)
+_RE_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.I)
+_RE_RUTA   = re.compile(r"^[~./][^\n]*$|^/[^\n]*$")
+_RE_NUM    = re.compile(r"^-?[\d.,]+([eE][-+]?\d+)?$")
+# Lo que delata a un comando. No se intenta adivinar por el nombre del
+# programa (son miles): se mira la forma, que es lo que no cambia.
+_RE_CMD    = re.compile(r"(^|\s)(sudo|git|npm|pip|apt|docker|systemctl|"
+                        r"export|cd|ssh|curl|chmod|bspc|python3?)\s|"
+                        r"[|$]|^\$\s|--?\w")
+
+
+# Codigo, sin intentar adivinar el lenguaje: los signos que la prosa no
+# usa y las palabras con las que empieza media linea de cualquier
+# lenguaje. Falla con prosa llena de parentesis, y el precio de fallar
+# es ensenar un parrafo en monoespaciada, que no rompe nada.
+_RE_CODIGO = re.compile(
+    r"[{};=()\[\]]|^\s*(def|class|import|from|const|let|var|function|"
+    r"public|private|return|if|for|while|#!|<\w)", re.M)
+
+
+def clip_tipo(txt):
+    """Que clase de cosa es lo copiado: una clave corta."""
+    una = txt.strip()
+    if not una:
+        return "texto"
+    if "\n" in una.strip("\n"):
+        # Varias lineas. Importa distinguir un parrafo de un trozo de
+        # codigo: el parrafo se lee en proporcional y el codigo NO, que
+        # es justo donde la l y el 1 se confunden.
+        if _RE_CMD.search(una):
+            return "cmd"
+        return "codigo" if _RE_CODIGO.search(una) else "lineas"
+    if _RE_COLOR.match(una):
+        return "color"
+    if _RE_CORREO.match(una):
+        return "correo"
+    if _RE_URL.match(una):
+        return "url"
+    if _RE_NUM.match(una):
+        return "numero"
+    if _RE_RUTA.match(una) and " " not in una:
+        return "ruta"
+    if _RE_CMD.search(una):
+        return "cmd"
+    return "texto"
+
+
+def clip_color(txt):
+    """El color de un #rrggbb, en 0..1, o None si no lo es."""
+    h = txt.strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) not in (6, 8):
+        return None
+    try:
+        return tuple(int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def clip_edad(seg):
+    """'hace 2 min'. En cristiano y sin decimales: lo que se quiere
+    saber es si es de ahora mismo o de hace rato."""
+    if seg is None:
+        return ""
+    if seg < 45:
+        return "ahora"
+    if seg < 3600:
+        return "hace %d min" % max(1, int(seg // 60))
+    if seg < 86400:
+        return "hace %d h" % int(seg // 3600)
+    return "hace %d d" % int(seg // 86400)
 
 
 # ----------------------------------------------------------- trabajo

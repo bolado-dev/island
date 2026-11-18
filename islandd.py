@@ -1609,7 +1609,7 @@ class Island(Gtk.Window):
     def build_port(self, cr):
         st = self.port or {"q": "", "sel": 0, "res": []}
         res = st["res"]
-        ANCHO = 560
+        ANCHO = 620
 
         cab = R.Row().add(
             self._ico("clip", 28, T.DIM, T.G_CLIP),
@@ -1628,22 +1628,87 @@ class Island(Gtk.Window):
             return R.Stack(filas, gap=T.GAP_ROW)
 
         sel = min(st["sel"], len(res) - 1)
+        filas.append(self._port_hero(cr, res[sel], ANCHO))
+        filas.append(R.Rule(ANCHO, T.DIM2))
+
         for i, txt in enumerate(res[:T.PP_FILAS]):
-            una = " ".join(txt.split())
-            # El numero de linea no es decoracion: dice cuantas cosas
-            # hay detras de lo que se ve y de un vistazo sabes si lo que
-            # buscas esta a dos flechas o a diez.
-            num = R.Text("%d" % (i + 1), T.F_SMALL, T.DIM2)
-            cuerpo = R.Text(self._clip(una, 58), T.F_SMALL,
-                            T.FG if i == sel else T.DIM)
-            fila = R.Row([R.Gap(4), num, R.Gap(14), cuerpo])
-            filas.append(R.Box(fila, bg=T.SURF_1 if i == sel else None,
-                               w=ANCHO, padx=12, pady=8, tag="pp:%d" % i))
+            filas.append(self._port_fila(cr, i, txt, i == sel, ANCHO))
 
         filas.append(R.Row().add(R.Text(
-            "\u2191\u2193 navegar \u00b7 \u23ce pegar \u00b7 esc cerrar",
-            T.F_SMALL, T.DIM2)))
-        return R.Stack(filas, gap=8)
+            "\u2191\u2193 mover \u00b7 1-9 pegar \u00b7 \u2326 olvidar "
+            "\u00b7 \u23ce pegar \u00b7 esc cerrar", T.F_SMALL, T.DIM2)))
+        return R.Stack(filas, gap=10)
+
+    @staticmethod
+    def _port_fuente(tipo, grande=False):
+        """Monoespaciada para lo que es codigo, proporcional para prosa."""
+        if tipo in T.PP_MONO:
+            fam, peso, px = T.F_MONO
+            return (fam, peso, px + 3) if grande else T.F_MONO
+        return T.F_BODY if grande else T.F_SMALL
+
+    def _port_hero(self, cr, txt, ancho):
+        """Lo seleccionado, entero y sin aplastar en una linea.
+
+        Es la diferencia entre ver 58 caracteres y ver lo que vas a
+        pegar: con dos rutas largas que empiezan igual, la lista sola no
+        te deja distinguirlas.
+        """
+        tipo = sources.clip_tipo(txt)
+        fuente = self._port_fuente(tipo, grande=True)
+        ancho_car = 46 if tipo in T.PP_MONO else 52
+        lineas = []
+        for cruda in txt.splitlines() or [""]:
+            lineas.extend(textwrap.wrap(cruda, ancho_car) or [""])
+            if len(lineas) > T.PP_LINEAS:
+                break
+        if len(lineas) > T.PP_LINEAS:
+            lineas = lineas[:T.PP_LINEAS]
+            lineas[-1] = lineas[-1].rstrip() + "\u2026"
+
+        cuerpo = R.Stack([R.Row().add(R.Text(l, fuente, T.FG))
+                          for l in lineas], gap=5)
+        # Un color se ensena, no se lee: el #0A84FF de al lado no dice
+        # nada y la muestra si.
+        rgb = sources.clip_color(txt) if tipo == "color" else None
+        if rgb is not None:
+            cuerpo = R.Row([R.Swatch(34, rgb), R.Gap(16), cuerpo])
+
+        _g, etiqueta = T.PP_TIPOS.get(tipo, T.PP_TIPOS["texto"])
+        n_lineas = len(txt.splitlines())
+        datos = [etiqueta]
+        if n_lineas > 1:
+            datos.append("%d l\u00edneas" % n_lineas)
+        datos.append("%d caracteres" % len(txt))
+        edad = sources.clip_edad(self.portapapeles.edad(txt))
+        if edad:
+            datos.append(edad)
+        return R.Stack([
+            cuerpo,
+            R.Row().add(R.Text(" \u00b7 ".join(datos), T.F_SMALL, T.DIM)),
+        ], gap=10)
+
+    def _port_fila(self, cr, i, txt, activa, ancho):
+        tipo = sources.clip_tipo(txt)
+        glifo, etiqueta = T.PP_TIPOS.get(tipo, T.PP_TIPOS["texto"])
+        col = T.FG if activa else T.DIM
+
+        # El numero no es adorno: es el atajo. Pulsar 3 pega el tercero
+        # sin tener que bajar con las flechas.
+        num = R.Text("%d" % (i + 1), T.F_SMALL, T.ACCENT if activa else T.DIM2)
+        rgb = sources.clip_color(txt) if tipo == "color" else None
+        cabeza = (R.Swatch(18, rgb) if rgb is not None
+                  else self._ico(glifo, 20, T.DIM2 if not activa else T.DIM))
+
+        una = " ".join(txt.split())
+        cuerpo = R.Text(self._clip(una, 44), self._port_fuente(tipo), col)
+        etq = R.Text(etiqueta, T.F_SMALL, T.DIM2)
+        hueco = max(10, ancho - 2 * 12 - 16 - 20 - 3 * T.GAP_ITEM
+                    - cuerpo.size(cr)[0] - etq.size(cr)[0])
+        fila = R.Row([num, R.Gap(T.GAP_ITEM), cabeza, R.Gap(T.GAP_ITEM),
+                      cuerpo, R.Gap(hueco), etq])
+        return R.Box(fila, bg=T.SURF_1 if activa else None,
+                     w=ancho, padx=12, pady=7, tag="pp:%d" % i)
 
     def _key_port(self, ev):
         st = self.port
@@ -1654,6 +1719,25 @@ class Island(Gtk.Window):
             return True
         if kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             self._port_sel()
+            return True
+        if kv in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete):
+            # Olvidar sin cerrar el panel: un historial del que no se
+            # puede sacar nada acaba lleno de cosas que no quieres ver.
+            if st["res"]:
+                self.portapapeles.borrar(
+                    st["res"][min(st["sel"], len(st["res"]) - 1)])
+                st["res"] = self._port_res(st["q"])
+                st["sel"] = min(st["sel"], max(0, len(st["res"]) - 1))
+            self.refresh()
+            return True
+        if Gdk.KEY_1 <= kv <= Gdk.KEY_9 and not st["q"]:
+            # Los numeros pegan directo, pero SOLO sin busqueda: si no,
+            # escribir "3 cosas" en el filtro pegaria la tercera en vez
+            # de escribirse.
+            i = kv - Gdk.KEY_1
+            if i < len(st["res"]):
+                st["sel"] = i
+                self._port_sel()
             return True
         if kv in (Gdk.KEY_Down, Gdk.KEY_Tab):
             st["sel"] = min(len(st["res"]) - 1, st["sel"] + 1)
