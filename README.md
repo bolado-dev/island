@@ -68,8 +68,10 @@ notificación, el cargador enchufado.
 
 **En reposo, solo la hora.** 126 píxeles. El volumen, el wifi, la batería, la
 fecha y el botón de encendido no están: aparecen al acercar el ratón y se van
-al apartarlo, y el reloj se queda **clavado en el sitio** mientras la fila
-crece hacia los dos lados, para que puedas seguir apuntándolo. Un icono
+al apartarlo, en el orden de siempre — hora, escritorios, estado. La fila mide
+exactamente lo que lleva dentro: se probó a rellenar con un hueco para que la
+hora no se moviera ni un píxel al abrirse, y el remedio era peor que la
+enfermedad, porque ese hueco negro de 180 px se lee como un fallo. Un icono
 permanente para algo que el 95% del tiempo dice «normal» ocupa sitio para no
 decir nada — y la regla ya la cumplían el dictado y el «no molestar»; esto es
 aplicarla al resto.
