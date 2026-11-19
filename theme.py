@@ -569,8 +569,8 @@ ACCION_SUB = {
 # El tamano va en fracciones de la isla, no en pixeles: asi la elipse
 # tiene la misma forma en una pildora de 300 y en una tarjeta de 900, y
 # una sola textura por color vale para las dos.
-GLOW_IN_A  = 0.26     # opacidad en el centro
-GLOW_IN_RX = 0.55     # radio horizontal, en anchos de isla
+GLOW_IN_A  = 0.21     # opacidad en el centro
+GLOW_IN_RX = 0.90     # radio horizontal, en anchos de isla
 GLOW_IN_RY = 1.10     # radio vertical, en altos de isla
 # Tope del alto de la luz, este en pixeles. Un panel alto --el lanzador
 # son 500 px- tiene la misma forma que una tarjeta, asi que sin tope la

@@ -125,6 +125,11 @@ textura de 128x64 por color sirve para las dos: se estira al pintarla, y
 estirarla es justo lo que la hace un medio radial estirado. Medido: 0,16 ms
 por fotograma, frente a 0,9 pintando el degradado de verdad cada vez.
 
+La caída va repartida en **cinco paradas** y la elipse es casi tan ancha como
+la isla. Con dos o tres paradas y un radio corto, el centro se queda como un
+punto brillante y el resto cae de golpe: se ve *dónde* está el foco, que es
+justo lo contrario de difuminado. Así no hay un punto, hay una zona.
+
 Brillan las **tarjetas**: avisos, dictado, música, capturas, el cargador al
 enchufarlo y las cuentas atrás al cumplirse. Los demás paneles no: un panel no
 se anuncia, lo has pedido.

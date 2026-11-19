@@ -780,7 +780,12 @@ def _dentro_tex(color):
     g = cairo.RadialGradient(tw * 0.5, 0, 0,
                              tw * 0.5, 0, tw * T.GLOW_IN_RX)
     r, v, a = color
-    for pos, k in ((0.0, 1.0), (0.45, 0.45), (0.75, 0.12), (1.0, 0.0)):
+    # La caida, repartida en cinco paradas. Con dos o tres, el centro
+    # se queda como un punto brillante y el resto cae de golpe: se ve
+    # DONDE esta el foco, que es justo lo contrario de difuminado. Asi
+    # no hay un punto, hay una zona.
+    for pos, k in ((0.0, 1.0), (0.35, 0.80), (0.60, 0.45),
+                   (0.80, 0.18), (1.0, 0.0)):
         g.add_color_stop_rgba(pos, r, v, a, k)
     # La elipse: ancha y baja. El centro va EN el canto de arriba, asi
     # que lo que se ve es la mitad de abajo.
