@@ -812,9 +812,12 @@ def resplandor_dentro(cr, x, y, w, h, color, alpha):
             _dentro_cache.clear()
         tex = _dentro_cache[clave] = _dentro_tex(color)
     tw, th = tex.get_width(), tex.get_height()
+    # El alto de la luz tiene tope: en un panel alto la elipse llegaria
+    # hasta abajo y seria un tinte, no una luz que entra por arriba.
+    alto = min(h, T.GLOW_IN_MAXH)
     cr.save()
     cr.translate(x, y)
-    cr.scale(w / float(tw), h / float(th))
+    cr.scale(w / float(tw), alto / float(th))
     cr.set_source_surface(tex, 0, 0)
     cr.get_source().set_filter(cairo.FILTER_BILINEAR)
     cr.paint_with_alpha(alpha)

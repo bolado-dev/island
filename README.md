@@ -126,10 +126,24 @@ estirarla es justo lo que la hace un medio radial estirado. Medido: 0,16 ms
 por fotograma, frente a 0,9 pintando el degradado de verdad cada vez.
 
 Brillan las **tarjetas**: avisos, dictado, música, capturas, el cargador al
-enchufarlo y las cuentas atrás al cumplirse. Los paneles que abres tú, no: un
-panel no se anuncia, lo has pedido. Entre dos avisos seguidos el color
-**viaja** en vez de saltar, y se enciende y se apaga con muelle: un halo que
-aparece de golpe se lee como un parpadeo.
+enchufarlo y las cuentas atrás al cumplirse. Los demás paneles no: un panel no
+se anuncia, lo has pedido.
+
+<p align="center">
+  <img src="docs/resplandor-lanzador.png" alt="El lanzador con Firefox seleccionado y un resplandor naranja, del color de su icono, entrando por el canto de arriba" width="520">
+</p>
+
+**El lanzador es la excepción**, y es donde más se nota: toma el color del
+resultado que tienes **señalado** y cambia al moverte por la lista, así que el
+notch se tiñe del programa que vas a abrir antes de abrirlo. Es la misma regla
+de siempre —el color de lo que estás viendo—, solo que aquí lo que estás
+viendo cambia con las flechas. En un panel alto la luz no se estira hasta
+abajo: tiene tope en píxeles, para que siga siendo una luz que entra por
+arriba y no un tinte.
+
+Entre dos avisos seguidos —o entre dos resultados— el color **viaja** en vez
+de saltar, y se enciende y se apaga con muelle: un halo que aparece de golpe
+se lee como un parpadeo.
 
 Hay además un halo que se derrama **fuera**, sobre el escritorio, con la
 silueta del notch desenfocada. Viene apagado (`GLOW_HALO` en `theme.py`)

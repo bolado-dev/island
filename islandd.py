@@ -700,6 +700,21 @@ class Island(Gtk.Window):
             return sources.color_dominante(d.get("art"), T.ACCENT)
         if act.kind == "captura":
             return T.ACCENT
+        if act.kind == "panel" and d.get("which") == "launcher":
+            # El lanzador toma el color de lo que tienes SEÑALADO, y
+            # cambia al moverte por la lista: el notch se tiñe del
+            # programa que vas a abrir antes de abrirlo. Es la misma
+            # idea que el resto --el color de lo que estas viendo-,
+            # solo que aqui lo que estas viendo cambia con las flechas.
+            st = self.launch
+            if not st or not st["res"]:
+                return None
+            fila = st["res"][min(st["sel"], len(st["res"]) - 1)]
+            tipo, titulo, _sub, icono, _carga = fila
+            if tipo in ("app", "win") and icono:
+                return sources.color_dominante(
+                    sources.load_icon(icono, 52, titulo), T.ACCENT)
+            return T.ACCENT
         if act.kind == "power":
             # Solo al enchufar. Que el notch se ponga verde al conectar
             # el cargador es la clase de aviso que se ve sin mirar.
