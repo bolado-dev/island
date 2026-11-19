@@ -92,6 +92,40 @@ te escriben.
 
 <table>
   <tr>
+    <td><img src="docs/resplandor-notificacion.png" alt="Una notificación de Telegram con un halo azul cian alrededor del notch, del color del icono"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/resplandor-dictado.png" alt="La tarjeta de dictado escuchando, con un halo naranja del color del logo de Claude"></td>
+  </tr>
+</table>
+
+**Y brilla del color de quien avisa.** El notch es negro opaco, así que lo
+único que puede decir *de quién* es lo que está enseñando, antes de que leas
+nada, es la luz que echa por los bordes. El color sale del icono de verdad —el
+favicon del servicio, la carátula del disco—, no de una lista de colores por
+aplicación: una lista hay que mantenerla y se queda corta con la primera app
+que no esté. Lo único que lleva tabla son los logos de las IA del dictado,
+porque sus SVG son siluetas de un color plano y no hay nada que sacarles.
+
+Sacarlo no es la media de los píxeles: la media de un logo sobre fondo blanco
+es gris claro, y un resplandor gris no es un resplandor. Cada píxel pesa lo
+**saturado** que está —que es lo que identifica a una marca—, se tiran los
+grises y lo casi negro, y el resultado se sube a un tono vivo. Lo que se pinta
+no es el icono: es la luz que echaría.
+
+El halo no se desenfoca: cairo no sabe. Se genera **una vez** a 1/8 de tamaño,
+con veinte siluetas concéntricas del propio notch cada vez más grandes y más
+tenues, y se estira al pintarlo — el estirado *es* el desenfoque, y lo hace
+gratis el filtro bilineal. La textura se guarda por tamaño redondeado y color,
+así que la expansión de la isla no regenera una por fotograma. Medido: 0,3 ms
+por fotograma mientras hay tarjeta, y en reposo no hay resplandor que pintar.
+
+Entre dos avisos seguidos el color **viaja** en vez de saltar, y se enciende y
+se apaga con muelle: un halo que aparece de golpe se lee como un parpadeo.
+Se apaga con `GLOW` en `theme.py`.
+
+<table>
+  <tr>
     <td><img src="docs/panel-volume.png" alt="Panel de volumen: icono de altavoz, deslizador arrastrable y porcentaje, todo en una fila"></td>
     <td><img src="docs/panel-power.png" alt="Panel de energía: estado de la batería y cuatro botones de perfil, con el activo resaltado en azul"></td>
   </tr>

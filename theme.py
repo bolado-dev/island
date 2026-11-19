@@ -481,3 +481,46 @@ F_CENT  = ("Inter Display", "semibold", 34)
 # trabajar, verde es parar. Es el mismo criterio que el resto de la
 # isla, donde el verde solo aparece cuando significa algo.
 POMO_COL = {"trabajo": ACCENT, "corto": GREEN, "largo": GREEN}
+
+# ---------------------------------------------------------------------
+# Resplandor.
+#
+# El notch es negro opaco sobre un fondo cualquiera, asi que la unica
+# forma que tiene de decir DE QUIEN es lo que esta enseñando, antes de
+# que leas nada, es la luz que echa por los bordes. El color sale del
+# propio icono --el favicon del servicio, la caratula del disco, el
+# logo de la IA-, no de una tabla: es el mismo gesto que hace un
+# televisor con la luz de detras.
+#
+# Se genera a 1/GLOW_ESC y se estira al pintarlo: el estirado ES el
+# desenfoque, y sale gratis porque lo hace el filtro bilineal al
+# escalar. Hacerlo a tamano real pediria un desenfoque de verdad, que
+# cairo no tiene.
+# ---------------------------------------------------------------------
+GLOW       = True
+GLOW_A     = 0.62     # opacidad del resplandor ya desplegado
+GLOW_M     = 84       # cuanto se derrama fuera de la isla
+GLOW_CAPAS = 20       # capas concentricas que forman la caida
+# Como se reparten esas capas. A 1 van a distancias iguales y el halo
+# sale como una nube uniforme; por encima se amontonan junto al cuerpo,
+# que es como cae la luz de verdad: un nucleo denso pegado al borde y
+# una cola larga y tenue.
+GLOW_CURVA = 1.8
+GLOW_ESC   = 8        # 1/8 del tamano al generarlo
+# En reposo se apaga del todo: la hora y la bateria no son de nadie, y
+# un notch que brilla siempre deja de decir nada al brillar.
+SP_GLOW_RESP = 0.55
+SP_GLOW_DAMP = 1.0
+# Lo que tarda el color en viajar de uno a otro cuando se encadenan dos
+# avisos. Por segundo, no por fotograma: a 120 Hz un paso fijo iria al
+# doble de velocidad que a 60.
+GLOW_LERP  = 7.0
+
+# Color de marca de cada IA, para el dictado. Aqui SI hace falta tabla:
+# los logos de icons/ son siluetas de un solo color (simple-icons), asi
+# que no hay color que sacarles.
+IA_COLOR = {
+    "claude": (0.851, 0.467, 0.341),   # #D97757
+    "codex":  (0.063, 0.639, 0.498),   # #10A37F
+    "gemini": (0.557, 0.459, 0.698),   # #8E75B2
+}

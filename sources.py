@@ -1385,6 +1385,85 @@ def copy_clipboard(texto):
 _thumb_cache = {}
 
 
+# El color de un icono, para el resplandor del notch. Se cachea POR
+# PIXBUF y guardando el propio pixbuf: la clave es su id(), y sin
+# conservar una referencia Python podria reutilizar ese id para otro
+# objeto y devolver el color de un icono distinto.
+_color_cache = {}
+_COLOR_MAX = 48
+
+
+def color_dominante(pb, respaldo=None):
+    """El color con el que brilla un icono.
+
+    No es la media de sus pixeles: la media de un logo de Discord sobre
+    fondo blanco es gris claro, y un resplandor gris no es un
+    resplandor. Se pesa cada pixel por lo SATURADO que esta, que es lo
+    que de verdad identifica a una marca, y se descartan los grises y lo
+    casi negro.
+
+    Y al final se sube el color a un tono vivo (saturacion y brillo
+    minimos). Lo que se pinta no es el icono, es la luz que echaria: una
+    luz apagada no se lee como luz, se lee como suciedad en la pantalla.
+    """
+    if pb is None:
+        return respaldo
+    clave = id(pb)
+    hit = _color_cache.get(clave)
+    if hit is not None:
+        return hit[1]
+
+    try:
+        # 16x16 basta y de sobra: lo que se busca es el tono, no el
+        # dibujo. Escalar primero convierte el bucle en 256 vueltas
+        # pase lo que pase, venga un favicon de 16 o una caratula de
+        # 600.
+        chico = pb.scale_simple(16, 16, GdkPixbuf.InterpType.BILINEAR)
+        if chico is None:
+            return respaldo
+        datos = chico.get_pixels()
+        canales = chico.get_n_channels()
+        fila = chico.get_rowstride()
+        alto, ancho = chico.get_height(), chico.get_width()
+    except Exception:
+        return respaldo
+
+    import colorsys
+    sr = sg = sb = peso = 0.0
+    mr = mg = mb = mpeso = 0.0
+    for y in range(alto):
+        base = y * fila
+        for x in range(ancho):
+            o = base + x * canales
+            r, g, b = datos[o] / 255.0, datos[o + 1] / 255.0, datos[o + 2] / 255.0
+            a = datos[o + 3] / 255.0 if canales == 4 else 1.0
+            if a < 0.5:
+                continue
+            h, l, sat = colorsys.rgb_to_hls(r, g, b)
+            mr += r * a; mg += g * a; mb += b * a; mpeso += a
+            if l < 0.12 or l > 0.95 or sat < 0.18:
+                continue        # negro, blanco o gris: no dicen el color
+            w = a * sat
+            sr += r * w; sg += g * w; sb += b * w; peso += w
+
+    if peso > 0.0:
+        r, g, b = sr / peso, sg / peso, sb / peso
+    elif mpeso > 0.0:
+        # Un logo en blanco y negro (bastantes lo son). Su media sirve
+        # para no dejarlo sin brillo, pero ya se sabe que saldra gris y
+        # el ajuste de abajo lo levanta.
+        r, g, b = mr / mpeso, mg / mpeso, mb / mpeso
+    else:
+        return respaldo
+
+    h, l, sat = colorsys.rgb_to_hls(r, g, b)
+    col = colorsys.hls_to_rgb(h, min(0.72, max(0.58, l)), max(0.62, sat))
+    if len(_color_cache) >= _COLOR_MAX:
+        _color_cache.clear()
+    _color_cache[clave] = (pb, col)
+    return col
+
+
 def load_thumb(ruta, alto):
     """Miniatura escalada a ese alto, cacheada por fichero y fecha.
 

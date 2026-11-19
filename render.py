@@ -729,6 +729,75 @@ def notch(cr, x, y, w, h, r, fillet=0.0):
     cr.close_path()
 
 
+# Texturas de resplandor ya generadas. La clave lleva el tamano
+# REDONDEADO y el color cuantizado: mientras la isla se expande su
+# anchura cambia en cada fotograma, y sin redondear se generaria una
+# textura nueva 120 veces por segundo.
+_glow_cache = {}
+_GLOW_MAX = 24
+
+
+def _glow_tex(w, h, color):
+    esc = T.GLOW_ESC
+    tw = max(1, int((w + 2 * T.GLOW_M) / esc))
+    th = max(1, int((h + 2 * T.GLOW_M) / esc))
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, tw, th)
+    cr = cairo.Context(surf)
+    cr.scale(1.0 / esc, 1.0 / esc)
+    n = T.GLOW_CAPAS
+    # De fuera hacia dentro, sumando. Cada capa es la silueta de la
+    # isla crecida un poco mas, asi que la luz CAE siguiendo su forma en
+    # vez de ser un ovalo pegado detras.
+    for i in range(n):
+        k = i / float(n - 1) if n > 1 else 1.0     # 1 = la mas pegada
+        crece = T.GLOW_M * (1.0 - k) ** T.GLOW_CURVA
+        # La silueta va CENTRADA en la textura, con el margen por los
+        # cuatro lados. Dibujandola pegada arriba, el halo salia 84 px
+        # mas alto que la isla: se amontonaba en las esquinas de arriba
+        # (que ademas caen fuera de la pantalla) y por abajo no llegaba.
+        x = T.GLOW_M - crece
+        y = T.GLOW_M - crece
+        notch(cr, x, y, w + 2 * crece, h + 2 * crece,
+              min((h + 2 * crece) / 2.0, T.NOTCH_R + crece), 0.0)
+        cr.set_source_rgba(color[0], color[1], color[2], 1.0 / n)
+        cr.fill()
+    surf.flush()
+    return surf
+
+
+def resplandor(cr, x, y, w, h, color, alpha):
+    """La luz que echa la isla por los bordes.
+
+    Se dibuja ANTES de la isla y por fuera de ella: dentro no se ve,
+    porque el cuerpo es negro opaco y lo tapa. Lo que se ve es el halo
+    de color sobre el escritorio.
+    """
+    if alpha <= 0.004:
+        return
+    clave = (int(w) // 16 * 16, int(h) // 8 * 8,
+             int(color[0] * 24), int(color[1] * 24), int(color[2] * 24))
+    tex = _glow_cache.get(clave)
+    if tex is None:
+        if len(_glow_cache) >= _GLOW_MAX:
+            _glow_cache.clear()
+        tex = _glow_cache[clave] = _glow_tex(clave[0] or 16, clave[1] or 8,
+                                             color)
+    tw, th = tex.get_width(), tex.get_height()
+    # La textura se genero para el tamano redondeado: al pintarla se
+    # estira al de verdad. Un halo desenfocado estirado unos pixeles no
+    # se distingue de uno generado a medida, y asi la cache sirve para
+    # toda la animacion de expansion.
+    dw = w + 2 * T.GLOW_M
+    dh = h + 2 * T.GLOW_M
+    cr.save()
+    cr.translate(x - T.GLOW_M, y - T.GLOW_M)
+    cr.scale(dw / float(tw), dh / float(th))
+    cr.set_source_surface(tex, 0, 0)
+    cr.get_source().set_filter(cairo.FILTER_BILINEAR)
+    cr.paint_with_alpha(alpha)
+    cr.restore()
+
+
 class BatteryAnim(object):
     """Bateria dibujada a mano, con animacion de carga.
 

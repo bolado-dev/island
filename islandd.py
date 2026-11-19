@@ -244,6 +244,13 @@ class Island(Gtk.Window):
         # entre zonas. Asi el cambio de un elemento a otro es continuo
         # (como el menu de macOS) y no un parpadeo de dos estados.
         self.hover = None
+        # Resplandor: el color con el que brilla la isla por los bordes.
+        # 'glow_col' es el que se esta pintando y '_glow_obj' al que va:
+        # entre dos avisos seguidos el color VIAJA, no salta.
+        self.sp_glow = Spring(0.0, response=T.SP_GLOW_RESP,
+                              damping=T.SP_GLOW_DAMP)
+        self.glow_col = None
+        self._glow_obj = None
         self.pw = None            # estado del campo de contrasena
         self.known = set()        # perfiles de red ya guardados
         self.caret_on = True
@@ -664,6 +671,42 @@ class Island(Gtk.Window):
             s = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
             self._mcr = cairo.Context(s)
         return self._mcr
+
+    def _glow_objetivo(self, act):
+        """De que color brilla la isla con lo que esta enseñando.
+
+        Sale del icono de verdad --el favicon del servicio, la caratula
+        del disco-, no de una lista de colores por aplicacion: una lista
+        hay que mantenerla y se queda corta con la primera app que no
+        este. Lo unico que lleva tabla son los logos de las IA, porque
+        sus SVG son siluetas de un color plano y no hay nada que
+        sacarles.
+        """
+        if not T.GLOW or act is None:
+            return None
+        d = act.data
+        if act.kind == "notify":
+            pb = d.get("pix") or sources.load_icon(d.get("icon"), 52,
+                                                   d.get("app", ""))
+            return sources.color_dominante(pb)
+        if act.kind == "music":
+            return sources.color_dominante(d.get("art"))
+        if act.kind == "tiempo":
+            # La tarjeta de una cuenta terminada ya sabe de que color es
+            # --azul el temporizador, el de la fase el pomodoro-, asi
+            # que el halo se lo copia y el aviso llega antes de leerlo.
+            return d.get("color")
+        if act.kind == "dictado":
+            # A donde va el dictado manda sobre el estado: el logo es lo
+            # que identifica la tarjeta. Sin IA conocida, el color de la
+            # fase, que es el mismo que ya tienen el microfono, los
+            # puntos y el visto.
+            col = T.IA_COLOR.get(d.get("ia") or self.foco.ia)
+            if col is not None:
+                return col
+            return {"oyendo": T.DICT_COLOR, "transcribiendo": T.DICT_WORK,
+                    "listo": T.DICT_OK}.get(d.get("state") or "oyendo")
+        return None
 
     def build(self, cr):
         act = self.current()
@@ -2800,6 +2843,15 @@ class Island(Gtk.Window):
             self.sp_fade.set(1.0)
             self.state_key = key
         self.content = item
+
+        # El resplandor se decide aqui y no al dibujar: esto corre
+        # cuando CAMBIA algo, y el dibujado 120 veces por segundo.
+        obj = self._glow_objetivo(self.current())
+        self._glow_obj = obj
+        if obj is not None and self.glow_col is None:
+            self.glow_col = obj          # el primero no viene de ningun sitio
+        self.sp_glow.set(1.0 if obj is not None else 0.0)
+
         # El ancho ya se acaba de medir aqui: guardarlo evita que el
         # dibujado vuelva a recorrer el arbol entero en CADA fotograma
         # para saber donde centrarlo. A 120 Hz eso son 120 recorridos
@@ -2865,8 +2917,12 @@ class Island(Gtk.Window):
         fotograma, a 60 fps, casi todos transparentes. Acotarlo a la
         zona util baja eso en mas de un orden de magnitud.
         """
-        cw = max(self.sp_w.value, self.sp_w.target) + 40
-        ch = max(self.sp_h.value, self.sp_h.target) + T.TOP + 40
+        # El halo se derrama fuera de la isla: si la zona a repintar
+        # fuese solo la isla, quedaria medio halo pintado del fotograma
+        # anterior colgando a los lados.
+        borde = 40 + (2 * T.GLOW_M if self.sp_glow.value > 0.004 else 0)
+        cw = max(self.sp_w.value, self.sp_w.target) + borde
+        ch = max(self.sp_h.value, self.sp_h.target) + T.TOP + borde
         # Union con la zona del fotograma ANTERIOR: al encogerse la isla,
         # lo que se pinto antes cae fuera de la zona nueva y se quedaria
         # ahi sin que nadie lo borrase (aparecian restos del contenido
@@ -2988,6 +3044,15 @@ class Island(Gtk.Window):
                 if abs(nuevo - visto) > 0.002:
                     moving = True
                 self.dict_shown[i] = nuevo
+        if self.sp_glow.step(dt):
+            moving = True
+        obj = self._glow_obj
+        if obj is not None and self.glow_col is not None:
+            k = min(1.0, dt * T.GLOW_LERP)
+            col = tuple(c + (o - c) * k for c, o in zip(self.glow_col, obj))
+            if max(abs(c - o) for c, o in zip(col, obj)) > 0.004:
+                moving = True
+            self.glow_col = col
         if T.WS_ANIM and self.sp_wsx.step(dt):
             moving = True
             # El contenido se construye con el valor del muelle, asi que
@@ -3109,6 +3174,14 @@ class Island(Gtk.Window):
         cr.set_operator(cairo.OPERATOR_OVER)
 
         x, y, w, h = self.geom()
+
+        # La luz, antes que el cuerpo: el notch es negro OPACO, asi que
+        # todo lo que caiga dentro queda tapado y lo que se ve es el
+        # halo sobre el escritorio.
+        if self.glow_col is not None and self.sp_glow.value > 0.004:
+            R.resplandor(cr, x, y, w, h, self.glow_col,
+                         self.sp_glow.value * T.GLOW_A)
+
         # notch(), no capsule(): arriba va recto contra el borde de la
         # pantalla y solo se redondea abajo. Los filetes cierran el
         # encuentro con el borde.

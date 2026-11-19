@@ -15,7 +15,7 @@ FIFO = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "island.fifo")
 p = argparse.ArgumentParser()
 p.add_argument("kind")
 for f in ("app", "title", "body", "artist", "urgency", "target", "ip", "icon",
-          "hint", "state", "text", "path", "thumb"):
+          "hint", "state", "text", "path", "thumb", "ia"):
     p.add_argument("--" + f, default=None)
 p.add_argument("--value", type=float, default=None)
 p.add_argument("--ttl", type=float, default=None)
