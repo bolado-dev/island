@@ -251,6 +251,7 @@ G_POWER_ACTS = [
 
 # Tipos de resultado del lanzador: glifo y etiqueta.
 G_RES = {
+    "accion": ("\uf0eb", "Acci\u00f3n"),
     "app":  ("\uf009", "Aplicaci\u00f3n"),
     "win":  ("\uf2d2", "Ventana"),
     "calc": ("\uf1ec", "Resultado"),
@@ -290,6 +291,7 @@ ICON_GLYPH = {
     "monocle": "\uf2d0", "balance": "\uf07e", "rotate": "\uf01e",
     "gap-plus": "\uf065", "gap-minus": "\uf066",
     "cal": G_CAL, "crono": G_CRONO, "temp": G_TEMP, "pomo": G_POMO,
+    "emoji": "\uf118", "clip": "\uf0ea",   # el mismo de G_CLIP, que se define mas abajo
     "play": G_PLAY, "pause": G_PAUSE, "reset": G_RESET, "skip": G_SKIP,
     "quita": G_QUITA,
     "mas": G_MAS, "menos": G_MENOS,
@@ -523,4 +525,39 @@ IA_COLOR = {
     "claude": (0.851, 0.467, 0.341),   # #D97757
     "codex":  (0.063, 0.639, 0.498),   # #10A37F
     "gemini": (0.557, 0.459, 0.698),   # #8E75B2
+}
+
+
+# ---------------------------------------------------------------------
+# Lo que el lanzador sabe hacer ademas de abrir programas.
+#
+# Un cronometro no es un .desktop: buscarlo por su nombre no encontraba
+# nada, y el unico sitio donde estaba era un icono del propio notch que
+# hay que saber que existe. Esto lo pone donde la gente busca las
+# cosas, que es escribiendo su nombre.
+#
+# (clave, titulo, palabras por las que se encuentra, icono)
+# ---------------------------------------------------------------------
+ACCIONES = (
+    ("crono", "Cron\u00f3metro", "cronometro crono tiempo stopwatch medir",
+     "crono"),
+    ("temp", "Temporizador", "temporizador timer cuenta atras alarma minutos",
+     "temp"),
+    ("pomo", "Pomodoro", "pomodoro tomate concentracion tanda trabajo",
+     "pomo"),
+    ("cal", "Calendario", "calendario mes fecha dias agenda", "cal"),
+    ("emoji", "Emoji", "emoji emojis iconos caritas simbolos", "emoji"),
+    ("portapapeles", "Portapapeles",
+     "portapapeles copiado historial clipboard pegar", "clip"),
+)
+
+# Lo que dice el subtitulo de cada una, que es lo que va a pasar al
+# pulsar Intro y no una descripcion de lo que es.
+ACCION_SUB = {
+    "crono": "Empieza a contar",
+    "temp":  "Elige cu\u00e1nto",
+    "pomo":  "Empieza la tanda",
+    "cal":   "Abre el mes",
+    "emoji": "Abre el selector",
+    "portapapeles": "Lo \u00faltimo que has copiado",
 }

@@ -120,6 +120,13 @@ gratis el filtro bilineal. La textura se guarda por tamaño redondeado y color,
 así que la expansión de la isla no regenera una por fotograma. Medido: 0,3 ms
 por fotograma mientras hay tarjeta, y en reposo no hay resplandor que pintar.
 
+Cuando no hay icono del que sacarlo —un `notify-send` pelado no manda
+ninguno— el halo usa el color con el que se dibuja la campana, así que sigue
+siendo el color de lo que estás viendo. Brillan las **tarjetas**: avisos,
+dictado, música, capturas, el cargador al enchufarlo y las cuentas atrás al
+cumplirse. Los paneles que abres tú, no: un panel no se anuncia, lo has
+pedido.
+
 Entre dos avisos seguidos el color **viaja** en vez de saltar, y se enciende y
 se apaga con muelle: un halo que aparece de golpe se lee como un parpadeo.
 Se apaga con `GLOW` en `theme.py`.
@@ -209,10 +216,22 @@ island-send tiempo --target pomo --state skip
 </p>
 
 **Lanzador.** Aplicaciones, ventanas abiertas, una calculadora, ejecución de
-comandos y lo último que has copiado, en una sola lista ordenada por
-relevancia y por uso. Las ventanas
+comandos, lo último que has copiado y las herramientas del propio notch, en
+una sola lista ordenada por relevancia y por uso. Las ventanas
 van primero a propósito: en un gestor de mosaico lo que sueles querer es
 saltar a algo que ya tienes abierto, no abrir otra instancia.
+
+Lo del notch está ahí porque un cronómetro **no es un `.desktop`**: buscarlo
+por su nombre no encontraba nada, y el único sitio donde vivía era un icono
+que hay que saber que existe. Escribiendo «cronómetro», «pomodoro», «emoji» o
+«portapapeles» sale su acción, y el Intro no se limita a abrir el panel: lo
+pone en marcha, porque quien escribe el nombre de un cronómetro quiere medir
+algo, no mirar un cero parado.
+
+Y una duración escrita se entiende como tal: «10 min», «90 s», «1 h» o
+«temporizador 25» arrancan la cuenta atrás directamente. Pide unidad a
+propósito — un «10» suelto es una cuenta de la calculadora o el principio de
+un nombre, no diez minutos.
 
 **El mismo atajo lo cierra.** `super + d` otra vez y se va, igual que
 `super + .` y `super + v` con los suyos. Tiene miga: mientras un panel está

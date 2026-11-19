@@ -16,6 +16,7 @@ reiniciar el escritorio no es un cronometro, es un registro: si el
 proceso se va, lo que estabas midiendo ya no vale.
 """
 import math
+import re
 import time
 
 
@@ -40,6 +41,54 @@ def centesimas(seg):
     cambian cien veces por segundo, asi que no pueden salir del mismo
     sitio que las cifras que ruedan."""
     return ",%02d" % (int(max(0.0, seg) * 100) % 100)
+
+
+# "10 min", "90 s", "1 h", "temporizador 25". Lo que se escribe en el
+# lanzador cuando lo que quieres es una cuenta atras y no un programa.
+_RE_DUR = re.compile(
+    r"^(?:(?:temporizador|timer|cuenta\s*atr[a\u00e1]s|alarma)\s+)?"
+    r"(\d{1,3})\s*(h|hora|horas|m|min|mins|minuto|minutos|s|seg|segs|"
+    r"segundo|segundos)$")
+_UNIDAD = {"h": 3600, "hora": 3600, "horas": 3600,
+           "m": 60, "min": 60, "mins": 60, "minuto": 60, "minutos": 60,
+           "s": 1, "seg": 1, "segs": 1, "segundo": 1, "segundos": 1}
+
+
+def duracion(texto):
+    """Segundos que pide un texto, o None si no pide ninguno.
+
+    Pide unidad a proposito: un "10" suelto es una cuenta de la
+    calculadora o el principio de un nombre, no diez minutos. Pero
+    "temporizador 10" si, porque ahi ya has dicho de que hablas.
+    """
+    t = " ".join((texto or "").lower().split())
+    m = _RE_DUR.match(t)
+    if m is None:
+        m = re.match(r"^(?:temporizador|timer|alarma)\s+(\d{1,3})$", t)
+        if m is None:
+            return None
+        seg = int(m.group(1)) * 60
+    else:
+        seg = int(m.group(1)) * _UNIDAD[m.group(2)]
+    return seg if 0 < seg <= 24 * 3600 else None
+
+
+def humano(seg):
+    """La duracion dicha como se dice: "10 min", no "10:00".
+
+    Un "10:00" en un titulo se lee como una hora del dia, que es
+    justo lo contrario de lo que es.
+    """
+    seg = int(max(0, seg))
+    h, m, s = seg // 3600, (seg // 60) % 60, seg % 60
+    trozos = []
+    if h:
+        trozos.append("%d h" % h)
+    if m:
+        trozos.append("%d min" % m)
+    if s or not trozos:
+        trozos.append("%d s" % s)
+    return " ".join(trozos)
 
 
 class Cronometro(object):

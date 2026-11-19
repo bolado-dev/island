@@ -1551,7 +1551,7 @@ _emoji_idx = None
 _emoji_lock = threading.Lock()
 
 
-def _sin_tildes(s):
+def sin_tildes(s):
     return "".join(c for c in unicodedata.normalize("NFD", s.lower())
                    if not unicodedata.combining(c))
 
@@ -1617,7 +1617,7 @@ def _emoji_parse():
         # nombre en ingles. Lo ultimo no es relleno; media jerga de
         # emoji se dice en ingles, y asi "fire" encuentra el fuego
         # aunque el nombre que se vea sea "fuego".
-        buscable = _sin_tildes(" ".join((nombre, claves_es, en)))
+        buscable = sin_tildes(" ".join((nombre, claves_es, en)))
         fuera.append((ch, nombre, GRUPOS_ES.get(grupo, grupo), buscable))
     return fuera
 
@@ -1652,7 +1652,7 @@ def emoji_buscar(q, limite=200):
     cuadricula sin ninguna estructura que seguir con la vista.
     """
     idx = emoji_index()
-    q = _sin_tildes(q.strip())
+    q = sin_tildes(q.strip())
     if not q:
         # Los usados van delante, con su propia etiqueta: asi el salto
         # entre grupos del teclado (tabulador) los trata como un grupo

@@ -686,11 +686,24 @@ class Island(Gtk.Window):
             return None
         d = act.data
         if act.kind == "notify":
+            # Con respaldo: la mitad de las notificaciones del sistema
+            # llegan SIN icono --un notify-send pelado no manda
+            # ninguno-, y sin respaldo esas eran justo las que no
+            # brillaban. El respaldo es el color con el que se dibuja la
+            # campana, asi que el halo sigue siendo el color de lo que
+            # se esta viendo.
             pb = d.get("pix") or sources.load_icon(d.get("icon"), 52,
                                                    d.get("app", ""))
-            return sources.color_dominante(pb)
+            fondo = T.RED if d.get("urgency") == "critical" else T.ACCENT
+            return sources.color_dominante(pb, fondo)
         if act.kind == "music":
-            return sources.color_dominante(d.get("art"))
+            return sources.color_dominante(d.get("art"), T.ACCENT)
+        if act.kind == "captura":
+            return T.ACCENT
+        if act.kind == "power":
+            # Solo al enchufar. Que el notch se ponga verde al conectar
+            # el cargador es la clase de aviso que se ve sin mirar.
+            return T.GREEN if d.get("charging") else None
         if act.kind == "tiempo":
             # La tarjeta de una cuenta terminada ya sabe de que color es
             # --azul el temporizador, el de la fase el pomodoro-, asi
@@ -1802,11 +1815,33 @@ class Island(Gtk.Window):
             out += [("app", a[0], "Aplicaci\u00f3n", a[2], a[1]) for a in apps]
             return out[:5]
 
-        ql = q.lower()
+        ql = sources.sin_tildes(q)
+
+        # Una cuenta atras escrita a mano: "10 min", "temporizador 25".
+        # Va con la calculadora, arriba del todo, por el mismo motivo:
+        # si lo que has escrito es una duracion, no es el nombre de un
+        # programa.
+        seg = tiempos.duracion(q)
+        if seg:
+            out.append(("accion", "Temporizador de %s"
+                        % tiempos.humano(seg),
+                        "Empieza la cuenta atr\u00e1s", "temp",
+                        "accion:temp:%d" % seg))
+
         for wid, titulo, clase in self.wins:
             if ql in titulo.lower() or ql in clase.lower():
                 out.append(("win", titulo, "Ventana \u00b7 %s" % clase,
                             clase, wid))
+
+        # Antes que las aplicaciones: con la misma puntuacion gana lo
+        # que no se puede abrir de otra forma. "Pomodoro" no es un
+        # programa que puedas lanzar desde otro sitio.
+        for clave, titulo, palabras, icono in T.ACCIONES:
+            tl = sources.sin_tildes(titulo)
+            if not (tl.startswith(ql) or ql in palabras):
+                continue
+            out.append(("accion", titulo, T.ACCION_SUB.get(clave, ""),
+                        icono, "accion:" + clave))
 
         for a in sources.match_apps(self.apps, q, 6):
             out.append(("app", a[0], "Aplicaci\u00f3n", a[2], a[1]))
@@ -1854,8 +1889,12 @@ class Island(Gtk.Window):
         # Destacado: lo que hara el Intro, en grande y con su tipo. Una
         # lista sola obliga a leer linea a linea para saber que esta
         # seleccionado; asi se ve de un vistazo.
-        pb = sources.load_icon(icono, 56, titulo) if icono else None
-        glifo, _etq = T.G_RES[tipo]
+        # Una accion trae el nombre de SU icono (el cronometro, el reloj
+        # de arena), no un icono del tema: enseñar el mismo glifo
+        # generico en las seis no distinguiria una de otra.
+        pb = (None if tipo == "accion"
+              else sources.load_icon(icono, 56, titulo) if icono else None)
+        glifo = icono if tipo == "accion" else T.G_RES[tipo][0]
         hero = R.Row().add(
             R.Image(pb, 56) if pb is not None
             else self._ico(glifo, 44, T.ACCENT),
@@ -1868,8 +1907,11 @@ class Island(Gtk.Window):
         filas.append(R.Rule(ANCHO, T.DIM2))
 
         for i, (t2, tit2, _s2, ic2, _p2) in enumerate(res):
-            pb2 = sources.load_icon(ic2, 26, tit2) if ic2 else None
+            pb2 = (None if t2 == "accion"
+                   else sources.load_icon(ic2, 26, tit2) if ic2 else None)
             g2, etq2 = T.G_RES[t2]
+            if t2 == "accion":
+                g2 = ic2
             nombre = R.Text(self._clip(tit2, 30), T.F_SMALL,
                             T.FG if i == sel else T.DIM)
             ancho_nom = nombre.size(cr)[0]
@@ -1938,6 +1980,11 @@ class Island(Gtk.Window):
                                    else "No se pudo copiar"})
             return
 
+        if tipo == "accion":
+            sources.frec_bump(carga)
+            self._accion(carga[len("accion:"):])
+            return
+
         if tipo == "win":
             # Saltar a una ventana ya abierta en vez de lanzar otra
             # instancia, que es lo que haria un lanzador a secas.
@@ -1947,6 +1994,29 @@ class Island(Gtk.Window):
 
         sources.frec_bump(carga)
         self._spawn(carga)
+
+    def _accion(self, clave):
+        """Una accion del lanzador: abre el panel que toca y, si lo que
+        has escrito es "cronometro", lo pone EN MARCHA.
+
+        Quien escribe el nombre de un cronometro y pulsa Intro quiere
+        medir algo, no mirar un cero parado. Lo que no arranca solo es
+        el temporizador sin minutos, porque ahi falta justo el dato.
+        """
+        if clave.startswith("temp:"):
+            self.tiempos.temp.arranca(int(clave[5:]))
+            self._programa_fin()
+            self._reloj_abre("temp")
+            return
+        if clave in ("crono", "temp", "pomo", "cal"):
+            if clave == "crono" and not self.tiempos.crono.corriendo:
+                self.tiempos.crono.alterna()
+            elif clave == "pomo" and not self.tiempos.pomo.corriendo:
+                self.tiempos.pomo.alterna()
+            self._programa_fin()
+            self._reloj_abre(clave)
+            return
+        self.open_panel(clave)
 
     def _captura_accion(self, acc):
         """Abrir, ver la carpeta o borrar la captura que se ensena."""
