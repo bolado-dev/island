@@ -765,6 +765,62 @@ def _glow_tex(w, h, color):
     return surf
 
 
+# El resplandor de DENTRO se guarda normalizado: la elipse se define en
+# fracciones del tamano de la isla, asi que una sola textura por color
+# sirve para cualquier anchura. Estirarla es justo lo que la hace
+# "medio radial estirado".
+_dentro_cache = {}
+_DENTRO_TEX = (128, 64)
+
+
+def _dentro_tex(color):
+    tw, th = _DENTRO_TEX
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, tw, th)
+    cr = cairo.Context(surf)
+    g = cairo.RadialGradient(tw * 0.5, 0, 0,
+                             tw * 0.5, 0, tw * T.GLOW_IN_RX)
+    r, v, a = color
+    for pos, k in ((0.0, 1.0), (0.45, 0.45), (0.75, 0.12), (1.0, 0.0)):
+        g.add_color_stop_rgba(pos, r, v, a, k)
+    # La elipse: ancha y baja. El centro va EN el canto de arriba, asi
+    # que lo que se ve es la mitad de abajo.
+    cr.save()
+    cr.scale(1.0, th * T.GLOW_IN_RY / (tw * T.GLOW_IN_RX))
+    cr.set_source(g)
+    cr.rectangle(0, 0, tw, th / (th * T.GLOW_IN_RY / (tw * T.GLOW_IN_RX)))
+    cr.fill()
+    cr.restore()
+    surf.flush()
+    return surf
+
+
+def resplandor_dentro(cr, x, y, w, h, color, alpha):
+    """La luz DENTRO del notch: medio radial estirado, pegado al canto
+    de arriba.
+
+    Va despues de recortar a la silueta y antes del contenido, asi que
+    el texto queda por encima y se sigue leyendo igual. Es la misma
+    idea que el halo de fuera pero al reves: en vez de iluminar el
+    escritorio, ilumina el propio cuerpo negro.
+    """
+    if alpha <= 0.004:
+        return
+    clave = (int(color[0] * 24), int(color[1] * 24), int(color[2] * 24))
+    tex = _dentro_cache.get(clave)
+    if tex is None:
+        if len(_dentro_cache) >= 24:
+            _dentro_cache.clear()
+        tex = _dentro_cache[clave] = _dentro_tex(color)
+    tw, th = tex.get_width(), tex.get_height()
+    cr.save()
+    cr.translate(x, y)
+    cr.scale(w / float(tw), h / float(th))
+    cr.set_source_surface(tex, 0, 0)
+    cr.get_source().set_filter(cairo.FILTER_BILINEAR)
+    cr.paint_with_alpha(alpha)
+    cr.restore()
+
+
 def resplandor(cr, x, y, w, h, color, alpha):
     """La luz que echa la isla por los bordes.
 

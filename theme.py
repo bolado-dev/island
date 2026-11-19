@@ -561,3 +561,18 @@ ACCION_SUB = {
     "emoji": "Abre el selector",
     "portapapeles": "Lo \u00faltimo que has copiado",
 }
+
+# El resplandor de DENTRO: medio radial estirado pegado al canto de
+# arriba del notch. Es el que se ve siempre, porque esta sobre el
+# cuerpo negro y no depende del fondo de escritorio que tengas.
+#
+# El tamano va en fracciones de la isla, no en pixeles: asi la elipse
+# tiene la misma forma en una pildora de 300 y en una tarjeta de 900, y
+# una sola textura por color vale para las dos.
+GLOW_IN_A  = 0.45     # opacidad en el centro
+GLOW_IN_RX = 0.55     # radio horizontal, en anchos de isla
+GLOW_IN_RY = 1.10     # radio vertical, en altos de isla
+
+# El halo de FUERA (el que se derrama sobre el escritorio). Apagado por
+# defecto: es otro efecto distinto, y los dos a la vez se pisan.
+GLOW_HALO  = False

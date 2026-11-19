@@ -2990,7 +2990,8 @@ class Island(Gtk.Window):
         # El halo se derrama fuera de la isla: si la zona a repintar
         # fuese solo la isla, quedaria medio halo pintado del fotograma
         # anterior colgando a los lados.
-        borde = 40 + (2 * T.GLOW_M if self.sp_glow.value > 0.004 else 0)
+        borde = 40 + (2 * T.GLOW_M if T.GLOW_HALO
+                      and self.sp_glow.value > 0.004 else 0)
         cw = max(self.sp_w.value, self.sp_w.target) + borde
         ch = max(self.sp_h.value, self.sp_h.target) + T.TOP + borde
         # Union con la zona del fotograma ANTERIOR: al encogerse la isla,
@@ -3245,10 +3246,11 @@ class Island(Gtk.Window):
 
         x, y, w, h = self.geom()
 
-        # La luz, antes que el cuerpo: el notch es negro OPACO, asi que
-        # todo lo que caiga dentro queda tapado y lo que se ve es el
-        # halo sobre el escritorio.
-        if self.glow_col is not None and self.sp_glow.value > 0.004:
+        # El halo de FUERA, antes que el cuerpo: el notch es negro
+        # OPACO, asi que lo que cae dentro queda tapado y lo que se ve
+        # es el derrame sobre el escritorio. Apagado por defecto.
+        if (T.GLOW_HALO and self.glow_col is not None
+                and self.sp_glow.value > 0.004):
             R.resplandor(cr, x, y, w, h, self.glow_col,
                          self.sp_glow.value * T.GLOW_A)
 
@@ -3259,6 +3261,16 @@ class Island(Gtk.Window):
         cr.set_source_rgb(*T.ISLAND)
         cr.fill_preserve()
         cr.clip()
+
+        # Y la luz de DENTRO, ya recortada a la silueta: medio radial
+        # estirado pegado al canto de arriba. Va antes del contenido,
+        # asi que el texto queda encima y se lee igual.
+        #
+        # Esta es la que se ve siempre: esta sobre el cuerpo negro y no
+        # depende del fondo de escritorio que haya detras.
+        if self.glow_col is not None and self.sp_glow.value > 0.004:
+            R.resplandor_dentro(cr, x, y, w, h, self.glow_col,
+                                self.sp_glow.value * T.GLOW_IN_A)
 
         f = max(0.0, min(1.0, self.sp_fade.value))
         cy = y + h / 2.0

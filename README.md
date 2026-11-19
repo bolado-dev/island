@@ -99,13 +99,19 @@ te escriben.
   </tr>
 </table>
 
-**Y brilla del color de quien avisa.** El notch es negro opaco, así que lo
-único que puede decir *de quién* es lo que está enseñando, antes de que leas
-nada, es la luz que echa por los bordes. El color sale del icono de verdad —el
-favicon del servicio, la carátula del disco—, no de una lista de colores por
-aplicación: una lista hay que mantenerla y se queda corta con la primera app
-que no esté. Lo único que lleva tabla son los logos de las IA del dictado,
-porque sus SVG son siluetas de un color plano y no hay nada que sacarles.
+**Y se enciende del color de quien avisa.** Un medio radial estirado, pegado
+al canto de arriba y por dentro del propio cuerpo. Dentro y no fuera a
+propósito: así se ve siempre igual, sin depender de qué fondo de escritorio
+tengas detrás. Va debajo del contenido, así que el texto se lee exactamente
+igual que antes.
+
+El color sale del icono de verdad —el favicon del servicio, la carátula del
+disco—, no de una lista de colores por aplicación: una lista hay que
+mantenerla y se queda corta con la primera app que no esté. Lo único que lleva
+tabla son los logos de las IA del dictado, porque sus SVG son siluetas de un
+color plano y no hay nada que sacarles. Y si no hay icono —un `notify-send`
+pelado no manda ninguno— se usa el color con el que se dibuja la campana, que
+es lo que estás viendo igualmente.
 
 Sacarlo no es la media de los píxeles: la media de un logo sobre fondo blanco
 es gris claro, y un resplandor gris no es un resplandor. Cada píxel pesa lo
@@ -113,23 +119,23 @@ es gris claro, y un resplandor gris no es un resplandor. Cada píxel pesa lo
 grises y lo casi negro, y el resultado se sube a un tono vivo. Lo que se pinta
 no es el icono: es la luz que echaría.
 
-El halo no se desenfoca: cairo no sabe. Se genera **una vez** a 1/8 de tamaño,
-con veinte siluetas concéntricas del propio notch cada vez más grandes y más
-tenues, y se estira al pintarlo — el estirado *es* el desenfoque, y lo hace
-gratis el filtro bilineal. La textura se guarda por tamaño redondeado y color,
-así que la expansión de la isla no regenera una por fotograma. Medido: 0,3 ms
-por fotograma mientras hay tarjeta, y en reposo no hay resplandor que pintar.
+La elipse se define en **fracciones de la isla**, no en píxeles, así que tiene
+la misma forma en una píldora de 300 y en una tarjeta de 900 y una sola
+textura de 128x64 por color sirve para las dos: se estira al pintarla, y
+estirarla es justo lo que la hace un medio radial estirado. Medido: 0,16 ms
+por fotograma, frente a 0,9 pintando el degradado de verdad cada vez.
 
-Cuando no hay icono del que sacarlo —un `notify-send` pelado no manda
-ninguno— el halo usa el color con el que se dibuja la campana, así que sigue
-siendo el color de lo que estás viendo. Brillan las **tarjetas**: avisos,
-dictado, música, capturas, el cargador al enchufarlo y las cuentas atrás al
-cumplirse. Los paneles que abres tú, no: un panel no se anuncia, lo has
-pedido.
+Brillan las **tarjetas**: avisos, dictado, música, capturas, el cargador al
+enchufarlo y las cuentas atrás al cumplirse. Los paneles que abres tú, no: un
+panel no se anuncia, lo has pedido. Entre dos avisos seguidos el color
+**viaja** en vez de saltar, y se enciende y se apaga con muelle: un halo que
+aparece de golpe se lee como un parpadeo.
 
-Entre dos avisos seguidos el color **viaja** en vez de saltar, y se enciende y
-se apaga con muelle: un halo que aparece de golpe se lee como un parpadeo.
-Se apaga con `GLOW` en `theme.py`.
+Hay además un halo que se derrama **fuera**, sobre el escritorio, con la
+silueta del notch desenfocada. Viene apagado (`GLOW_HALO` en `theme.py`)
+porque los dos a la vez se pisan. Se genera una vez a 1/8 de tamaño con veinte
+siluetas concéntricas y se estira al pintarlo: el estirado hace de
+desenfoque, que cairo no tiene. `GLOW` apaga los dos.
 
 <table>
   <tr>
