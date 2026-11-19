@@ -251,6 +251,11 @@ class Island(Gtk.Window):
                               damping=T.SP_GLOW_DAMP)
         self.glow_col = None
         self._glow_obj = None
+        # Latido: solo en lo que AVISA. Un panel que late mientras
+        # escribes en el seria una luz parpadeando al lado del texto.
+        self._glow_pulsa = False
+        self.glow_fase = 0.0
+        self._pulso_acum = 0.0
         self.pw = None            # estado del campo de contrasena
         self.known = set()        # perfiles de red ya guardados
         self.caret_on = True
@@ -2931,8 +2936,21 @@ class Island(Gtk.Window):
 
         # El resplandor se decide aqui y no al dibujar: esto corre
         # cuando CAMBIA algo, y el dibujado 120 veces por segundo.
-        obj = self._glow_objetivo(self.current())
+        act = self.current()
+        obj = self._glow_objetivo(act)
         self._glow_obj = obj
+        # Late lo que AVISA y dura poco. El panel no --una luz
+        # parpadeando al lado del texto que escribes es lo contrario de
+        # ayudar- y la musica tampoco: esa tarjeta se queda mientras
+        # suene el disco, y algo que respira durante cuarenta minutos
+        # deja de ser un latido y pasa a ser un parpadeo.
+        late = (obj is not None and act is not None
+                and act.kind not in ("panel", "music"))
+        if late and not self._glow_pulsa:
+            # Empieza siempre desde abajo, no por donde se quedo el
+            # aviso anterior: asi la tarjeta entra encendiendose.
+            self.glow_fase = 0.0
+        self._glow_pulsa = late
         if obj is not None and self.glow_col is None:
             self.glow_col = obj          # el primero no viene de ningun sitio
         self.sp_glow.set(1.0 if obj is not None else 0.0)
@@ -3183,6 +3201,21 @@ class Island(Gtk.Window):
             self._tick_tiempos()
             moving = True
 
+        # El latido del resplandor, al final del todo y a proposito: hay
+        # que saber primero si se mueve algo MAS. Si no se mueve nada,
+        # el latido no necesita 120 Hz --es una rampa de opacidad, no un
+        # movimiento- y a 30 pasos por segundo se ve igual costando la
+        # cuarta parte. El bucle sigue vivo; lo que se salta es el
+        # repintado.
+        if self._glow_pulsa and self.sp_glow.value > 0.004:
+            self.glow_fase = (self.glow_fase + dt / T.GLOW_PULSO_S) % 1.0
+            if not moving:
+                self._pulso_acum += dt
+                if self._pulso_acum < 1.0 / T.GLOW_PULSO_FPS:
+                    return True
+                self._pulso_acum = 0.0
+            moving = True
+
         self._damage()
         if not moving:
             self._tick_id = None
@@ -3284,8 +3317,16 @@ class Island(Gtk.Window):
         # Esta es la que se ve siempre: esta sobre el cuerpo negro y no
         # depende del fondo de escritorio que haya detras.
         if self.glow_col is not None and self.sp_glow.value > 0.004:
-            R.resplandor_dentro(cr, x, y, w, h, self.glow_col,
-                                self.sp_glow.value * T.GLOW_IN_A)
+            a = self.sp_glow.value * T.GLOW_IN_A
+            crece = 0.0
+            if self._glow_pulsa:
+                # Coseno y no diente de sierra: lo que se quiere es
+                # respirar, y una rampa que vuelve de golpe al principio
+                # se ve como un corte por muy lenta que sea.
+                lat = 0.5 - 0.5 * math.cos(2 * math.pi * self.glow_fase)
+                a *= 1.0 - T.GLOW_PULSO * lat
+                crece = T.GLOW_PULSO_CRECE * lat
+            R.resplandor_dentro(cr, x, y, w, h, self.glow_col, a, crece)
 
         f = max(0.0, min(1.0, self.sp_fade.value))
         cy = y + h / 2.0

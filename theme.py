@@ -581,3 +581,15 @@ GLOW_IN_MAXH = 180
 # El halo de FUERA (el que se derrama sobre el escritorio). Apagado por
 # defecto: es otro efecto distinto, y los dos a la vez se pisan.
 GLOW_HALO  = False
+
+# Latido del resplandor. Lento y poco profundo: es una respiracion, no
+# un intermitente. Solo late lo que AVISA --un aviso, el dictado, la
+# musica-; el lanzador no, porque una luz parpadeando al lado del texto
+# que estas escribiendo es justo lo contrario de ayudar.
+GLOW_PULSO      = 0.38    # cuanto baja la luz en lo mas bajo del ciclo
+GLOW_PULSO_S    = 2.6     # segundos por respiracion
+GLOW_PULSO_CRECE = 0.07   # y crece un pelo al encenderse, como el aire
+# Pasos por segundo del latido cuando no se mueve nada mas. Es una
+# rampa de opacidad, no un movimiento: a 30 se ve igual que a 120 y
+# cuesta la cuarta parte.
+GLOW_PULSO_FPS  = 30.0

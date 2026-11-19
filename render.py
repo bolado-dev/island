@@ -799,7 +799,7 @@ def _dentro_tex(color):
     return surf
 
 
-def resplandor_dentro(cr, x, y, w, h, color, alpha):
+def resplandor_dentro(cr, x, y, w, h, color, alpha, crece=0.0):
     """La luz DENTRO del notch: medio radial estirado, pegado al canto
     de arriba.
 
@@ -819,10 +819,14 @@ def resplandor_dentro(cr, x, y, w, h, color, alpha):
     tw, th = tex.get_width(), tex.get_height()
     # El alto de la luz tiene tope: en un panel alto la elipse llegaria
     # hasta abajo y seria un tinte, no una luz que entra por arriba.
-    alto = min(h, T.GLOW_IN_MAXH)
+    alto = min(h, T.GLOW_IN_MAXH) * (1.0 + crece)
+    ancho = w * (1.0 + crece)
     cr.save()
-    cr.translate(x, y)
-    cr.scale(w / float(tw), alto / float(th))
+    # Lo que crece lo hace desde el centro de arriba, que es donde esta
+    # el foco de la elipse: creciendo desde la esquina, el latido se
+    # leeria como un desplazamiento lateral.
+    cr.translate(x - w * crece / 2.0, y)
+    cr.scale(ancho / float(tw), alto / float(th))
     cr.set_source_surface(tex, 0, 0)
     cr.get_source().set_filter(cairo.FILTER_BILINEAR)
     cr.paint_with_alpha(alpha)

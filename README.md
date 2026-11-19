@@ -150,6 +150,20 @@ Entre dos avisos seguidos —o entre dos resultados— el color **viaja** en vez
 de saltar, y se enciende y se apaga con muelle: un halo que aparece de golpe
 se lee como un parpadeo.
 
+**Y respira.** Un latido lento de 2,6 s, con coseno y no con rampa: una rampa
+que vuelve de golpe al principio se ve como un corte por muy lenta que sea. La
+luz baja un 38% en lo más bajo del ciclo y crece un pelo al encenderse, como
+el aire. Late lo que **avisa**: un aviso, el dictado, una captura, el cargador,
+una cuenta cumplida. El lanzador no, porque una luz parpadeando al lado del
+texto que estás escribiendo es lo contrario de ayudar; y la música tampoco,
+porque esa tarjeta se queda mientras suene el disco y algo que respira durante
+cuarenta minutos deja de ser un latido.
+
+El latido **no corre a 120 Hz**. Es una rampa de opacidad, no un movimiento:
+si no se mueve nada más en la isla, el bucle sigue vivo pero solo repinta 30
+veces por segundo, que se ve exactamente igual. Medido: 3% de un núcleo
+mientras una tarjeta respira, y 0 en reposo.
+
 Hay además un halo que se derrama **fuera**, sobre el escritorio, con la
 silueta del notch desenfocada. Viene apagado (`GLOW_HALO` en `theme.py`)
 porque los dos a la vez se pisan. Se genera una vez a 1/8 de tamaño con veinte
