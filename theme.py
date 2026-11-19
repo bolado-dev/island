@@ -563,7 +563,7 @@ ACCION_SUB = {
 }
 
 # El resplandor de DENTRO: medio radial estirado pegado al canto de
-# arriba del notch. Es el que se ve siempre, porque esta sobre el
+# abajo del notch. Es el que se ve siempre, porque esta sobre el
 # cuerpo negro y no depende del fondo de escritorio que tengas.
 #
 # El tamano va en fracciones de la isla, no en pixeles: asi la elipse
@@ -574,9 +574,13 @@ GLOW_IN_RX = 0.90     # radio horizontal, en anchos de isla
 GLOW_IN_RY = 1.10     # radio vertical, en altos de isla
 # Tope del alto de la luz, este en pixeles. Un panel alto --el lanzador
 # son 500 px- tiene la misma forma que una tarjeta, asi que sin tope la
-# elipse se estiraria hasta abajo y teñiria el panel entero en vez de
-# entrar por arriba.
+# elipse se estiraria de canto a canto y teñiria el panel entero en vez
+# de entrar por uno de ellos.
 GLOW_IN_MAXH = 180
+# De que canto sale la luz. Abajo: arriba el notch esta pegado al borde
+# de la pantalla y la luz muere contra un canto recto, mientras que
+# abajo monta sobre las dos esquinas redondeadas. A False vuelve arriba.
+GLOW_IN_ABAJO = True
 
 # El halo de FUERA (el que se derrama sobre el escritorio). Apagado por
 # defecto: es otro efecto distinto, y los dos a la vez se pisan.

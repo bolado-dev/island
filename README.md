@@ -100,7 +100,11 @@ te escriben.
 </table>
 
 **Y se enciende del color de quien avisa.** Un medio radial estirado, pegado
-al canto de arriba y por dentro del propio cuerpo. Dentro y no fuera a
+al canto de **abajo** y por dentro del propio cuerpo. Abajo y no arriba
+porque arriba el notch está pegado al borde de la pantalla y la luz muere
+contra un canto recto; abajo monta sobre las dos esquinas redondeadas, que es
+la única forma libre que tiene, y se lee como luz del propio cuerpo. Dentro y
+no fuera a
 propósito: así se ve siempre igual, sin depender de qué fondo de escritorio
 tengas detrás. Va debajo del contenido, así que el texto se lee exactamente
 igual que antes.
@@ -135,16 +139,16 @@ enchufarlo y las cuentas atrás al cumplirse. Los demás paneles no: un panel no
 se anuncia, lo has pedido.
 
 <p align="center">
-  <img src="docs/resplandor-lanzador.png" alt="El lanzador con Firefox seleccionado y un resplandor naranja, del color de su icono, entrando por el canto de arriba" width="520">
+  <img src="docs/resplandor-lanzador.png" alt="El lanzador con Firefox seleccionado y un resplandor naranja, del color de su icono, saliendo del canto de abajo" width="520">
 </p>
 
 **El lanzador es la excepción**, y es donde más se nota: toma el color del
 resultado que tienes **señalado** y cambia al moverte por la lista, así que el
 notch se tiñe del programa que vas a abrir antes de abrirlo. Es la misma regla
 de siempre —el color de lo que estás viendo—, solo que aquí lo que estás
-viendo cambia con las flechas. En un panel alto la luz no se estira hasta
-abajo: tiene tope en píxeles, para que siga siendo una luz que entra por
-arriba y no un tinte.
+viendo cambia con las flechas. En un panel alto la luz no se estira de canto
+a canto: tiene tope en píxeles, para que siga siendo una luz que entra por uno
+de ellos y no un tinte.
 
 Entre dos avisos seguidos —o entre dos resultados— el color **viaja** en vez
 de saltar, y se enciende y se apaga con muelle: un halo que aparece de golpe
