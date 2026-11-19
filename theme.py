@@ -597,3 +597,8 @@ GLOW_PULSO_CRECE = 0.07   # y crece un pelo al encenderse, como el aire
 # rampa de opacidad, no un movimiento: a 30 se ve igual que a 120 y
 # cuesta la cuarta parte.
 GLOW_PULSO_FPS  = 30.0
+
+# Bateria por debajo de la cual el notch la enseña en reposo. Por
+# encima no: el enchufe ya saca su tarjeta al conectarlo, y un
+# porcentaje fijo que casi siempre dice "voy bien" es ruido.
+BAT_AVISO = 25

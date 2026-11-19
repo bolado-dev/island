@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.png" alt="El notch en reposo sobre el escritorio: reloj, fecha, indicador de escritorios y estado del sistema, en una pastilla negra colgando del borde superior" width="900">
+  <img src="docs/hero.png" alt="El notch en reposo sobre el escritorio: una pastilla negra con la hora, colgando del borde superior" width="900">
 </p>
 
 ---
@@ -34,10 +34,10 @@ hueco ya está perdido por el hardware, así que lo usan para lo que importa y
 el resto del tiempo no está. El Dynamic Island da el paso siguiente — la
 misma pieza cambia de tamaño según lo que tenga que decirte.
 
-island es eso para bspwm. En reposo es una pastilla pequeña pegada al borde.
-Cuando llega una notificación se abre en tarjeta; cuando tocas el volumen se
-estira en una píldora con el deslizador; cuando levantas una VPN se queda con
-la IP hasta que la bajas.
+island es eso para bspwm. En reposo son **126 píxeles con la hora** y nada
+más. Cuando llega una notificación se abre en tarjeta; cuando tocas el volumen
+se estira en una píldora con el deslizador; cuando acercas el ratón enseña el
+estado entero; cuando levantas una VPN se queda con la IP hasta que la bajas.
 
 **Por qué no es una configuración de polybar.** Lo intenté primero. Polybar
 dibuja texto y repinta la barra entera en cada actualización: se puede
@@ -62,7 +62,28 @@ notch deja asomar 3 píxeles. Baja al acercar el ratón al borde superior, y
 también solo cuando hay algo que enseñar — un cambio de escritorio, una
 notificación, el cargador enchufado.
 
-**Escritorios.** Una pista de segmentos con la píldora del activo. La píldora
+<p align="center">
+  <img src="docs/notch.png" alt="Arriba, el notch en reposo: solo la hora. Abajo, con el ratón encima: fecha, escritorios, volumen, wifi, batería y apagado, con la hora en el mismo sitio" width="800">
+</p>
+
+**En reposo, solo la hora.** 126 píxeles. El volumen, el wifi, la batería, la
+fecha y el botón de encendido no están: aparecen al acercar el ratón y se van
+al apartarlo, y el reloj se queda **clavado en el sitio** mientras la fila
+crece hacia los dos lados, para que puedas seguir apuntándolo. Un icono
+permanente para algo que el 95% del tiempo dice «normal» ocupa sitio para no
+decir nada — y la regla ya la cumplían el dictado y el «no molestar»; esto es
+aplicarla al resto.
+
+Lo que sí sale sin pedirlo es lo que **está pasando**: que estés dictando, que
+haya un micrófono abierto, que el sonido esté silenciado, que no haya wifi,
+que la batería esté por debajo de `BAT_AVISO`, que corra un cronómetro. Son
+excepciones, no estado fijo. Y nada pierde alcance: el volumen ya salta solo
+al tocar la rueda, el cargador saca su tarjeta al enchufarlo y el resto está a
+un clic o a dos letras en el lanzador.
+
+**Escritorios.** Una pista de segmentos con la píldora del activo, que tampoco
+está fija: sale al cambiar de escritorio —que es el único instante en que
+significa algo— y se va con el notch. La píldora
 no viaja entre huecos: nace como un punto en el escritorio nuevo y se estira
 hasta su tamaño mientras el anterior hace el gesto al revés, encogiendo y
 apagándose. Verla cruzar por encima de los escritorios de en medio arrastraba
