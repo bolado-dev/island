@@ -31,6 +31,7 @@ import render as R
 from spring import Spring
 import sources
 import controls
+import tiempos
 import config as C
 
 
@@ -199,6 +200,15 @@ class Island(Gtk.Window):
         self.dict_shown = deque(maxlen=T.DICT_BARS)
         self.wifi_nets = None
         self.cal_off = 0          # meses de desplazamiento respecto a hoy
+        # Lo que hay detras del reloj: calendario, cronometro,
+        # temporizador y pomodoro. La pestana se RECUERDA entre
+        # aperturas: si estas midiendo algo, volver a la hora y tener
+        # que buscar la pestana otra vez seria el camino largo.
+        self.tiempos = tiempos.Tiempos(C.POMO_TRABAJO, C.POMO_CORTO,
+                                       C.POMO_LARGO, C.POMO_CADA)
+        self.reloj_tab = "cal"
+        self._fin = {}            # temporizadores exactos de fin de cuenta
+        self._ult_t = {}          # ultimo texto visto de cada contador
         self.dnd = False          # dunst en pausa
         self.oculto = False
         self._hide_id = None
@@ -345,6 +355,10 @@ class Island(Gtk.Window):
     def _tick_1s(self):
         self._poll_power()
         self._tick_clock()
+        # El indicador del notch va a ritmo de segundo, y con esto basta:
+        # mantener vivo el bucle de 120 Hz para mover dos cifras una vez
+        # por segundo seria despertar al proceso 120 veces para nada 119.
+        self._tick_tiempos()
         return True
 
     def _prof_dump(self):
@@ -490,6 +504,22 @@ class Island(Gtk.Window):
             # tecla en sxhkd, y es lo que hace comprobable el panel de
             # forma automatica.
             self.open_panel(ev.get("target", "volume"))
+            return
+        if kind == "tiempo":
+            # Los mismos mandos del panel, desde la linea de ordenes:
+            #   island-send tiempo --target temp --value 1500
+            #   island-send tiempo --target pomo --state play
+            # Sirve para atar un temporizador a una tecla, y es lo que
+            # hace comprobable el panel sin tocar el raton.
+            cual = ev.get("target") or "temp"
+            quien = {"crono": "cro", "temp": "tmp", "pomo": "pom"}.get(cual)
+            if quien is None:
+                return
+            if cual == "temp" and ev.get("value"):
+                self._tiempo_accion("tmp:%d" % int(ev["value"]))
+            else:
+                self._tiempo_accion(quien + ":" + (ev.get("state") or "play"))
+            self._reloj_abre(cual)
             return
         if kind == "dismiss":
             self.activities.pop(ev.get("target", ""), None)
@@ -651,6 +681,10 @@ class Island(Gtk.Window):
             # como cambio de estado y el realce de hover se queda pegado
             # sobre una zona que ya no existe.
             key = "panel:" + str(act.data.get("which"))
+            if act.data.get("tab"):
+                # Y distingue cada PESTANA del reloj por lo mismo: el
+                # calendario y el cronometro no comparten ni una zona.
+                key += ":" + act.data["tab"]
         return key, act.mode, self.build_activity(cr, act)
 
     @staticmethod
@@ -687,6 +721,21 @@ class Island(Gtk.Window):
             R.Text(time.strftime("%a %d %b"), T.F_SMALL, T.DIM),
         ], tag="clock"))
         row.add(R.Gap(T.GAP_GROUP))
+
+        # Cronometro, temporizador o pomodoro en marcha. Pegado al reloj
+        # porque es lo mismo que el reloj --tiempo- y porque al pulsarlo
+        # se abre justo la pestana desde la que lo pusiste en marcha.
+        #
+        # En pausa tambien sale, apagado: olvidarse de una cuenta parada
+        # es justo lo que este indicador evita.
+        for cual, texto, corre in self.tiempos.activos():
+            col = self._color_tiempo(cual, corre)
+            row.add(R.Row([
+                self._ico(cual, 24, col),
+                R.Gap(8),
+                R.Rodillo(self._rodillo("t:" + cual, texto), T.F_TITLE, col),
+            ], tag="tiempo:" + cual))
+            row.add(R.Gap(T.GAP_GROUP))
 
         # Indicador de escritorios: pista de huecos iguales con una
         # pildora azul que se desliza al cambiar. El muelle solo mueve
@@ -975,6 +1024,32 @@ class Island(Gtk.Window):
                 ], gap=5),
                 R.Gap(24), botones)
 
+        if k == "tiempo":
+            # Cuenta atras terminada, o cambio de fase del pomodoro.
+            # Misma forma que la tarjeta de una captura --icono, dos
+            # lineas y botones- porque es el mismo tipo de aviso: algo
+            # que acaba de pasar y sobre lo que todavia puedes hacer una
+            # cosa mas.
+            col = d.get("color") or T.ACCENT
+            fila = R.Row().add(
+                self._ico(d.get("icono") or "temp", 34, col),
+                R.Gap(18),
+                R.Stack([
+                    R.Row().add(R.Text(d.get("titulo", ""), T.F_TITLE, T.FG)),
+                    R.Row().add(R.Text(d.get("cuerpo", ""), T.F_SUB, T.DIM)),
+                ], gap=5))
+            if d.get("repite"):
+                fila.add(
+                    R.Gap(T.GAP_GROUP),
+                    R.Chip("Repetir", T.F_SMALL, T.FG,
+                           T.ACCENT if self.hover == "tc:rep" else T.SURF_1,
+                           tag="tc:rep", padx=18, pady=11),
+                    R.Gap(10),
+                    R.Chip("Listo", T.F_SMALL, T.FG,
+                           T.ACCENT if self.hover == "tc:ok" else T.SURF_1,
+                           tag="tc:ok", padx=18, pady=11))
+            return fila
+
         if k == "music":
             art = d.get("art")
             tocando = self.player.status == "Playing"
@@ -1107,7 +1182,7 @@ class Island(Gtk.Window):
                 chips)
 
         if which == "calendar":
-            return self.build_calendar(cr)
+            return self.build_reloj(cr)
 
         if which == "desktop":
             mono = controls.bspwm_layout() == "monocle"
@@ -1312,6 +1387,345 @@ class Island(Gtk.Window):
                                circle=T.ACCENT if es_hoy else None))
             filas.append(fila)
         return R.Stack(filas, gap=6, center=True)
+
+    # ----------------------------------------- reloj: crono, temp, pomo
+
+    def build_reloj(self, cr):
+        """El panel de detras del reloj: cuatro pestanas, un solo ancho.
+
+        El calendario era lo unico que habia aqui. Las otras tres son lo
+        que de verdad se le pide a un reloj aparte de la fecha: medir,
+        contar hacia atras y trabajar a tandas.
+
+        Las cuatro miden REL_ANCHO de ancho (el del calendario, que es
+        la mas ancha), asi que cambiar de pestana solo mueve el alto de
+        la isla. Con anchos distintos, cada clic en la barra daria un
+        salto lateral debajo del propio dedo.
+        """
+        tab = self.reloj_tab
+        cuerpo = {"cal": self.build_calendar, "crono": self.build_crono,
+                  "temp": self.build_temp,    "pomo": self.build_pomo}[tab](cr)
+        return R.Stack([self._reloj_tabs(tab), cuerpo],
+                       gap=T.GAP_ROW + 6, center=True)
+
+    def _reloj_tabs(self, tab):
+        """La barra de pestanas, ARRIBA.
+
+        No es por gusto. El notch cuelga del borde de la pantalla, asi
+        que su canto de arriba no se mueve nunca y el de abajo sube y
+        baja con lo que mida cada pestana: el calendario ocupa 440 y el
+        cronometro 300. Con la barra abajo --como las categorias del
+        emoji, que ahi si valen porque la rejilla mide siempre igual-,
+        al pulsar "cronometro" el panel encoge y la barra se va 140 px
+        hacia arriba, fuera de donde acabas de pulsar. El segundo clic
+        caia en el escritorio y cerraba el panel.
+
+        Arriba, las cuatro pestanas estan SIEMPRE en el mismo sitio.
+        """
+        fila = R.Row()
+        for i, (clave, icono, _etiqueta) in enumerate(T.REL_TABS):
+            if i:
+                fila.add(R.Gap(T.REL_GAP))
+            activa = (clave == tab)
+            # Una pestana que NO es la actual se enciende en azul si lo
+            # suyo esta corriendo: es como se ve, desde el calendario,
+            # que el pomodoro sigue en marcha.
+            col = (T.FG if activa else
+                   T.ACCENT if clave != "cal" and self.tiempos.corriendo(clave)
+                   else T.DIM)
+            fila.add(R.Cell(self._ico(icono, 26, col),
+                            T.REL_CELDA, T.REL_TAB_H,
+                            bg=T.SURF_2 if activa else None,
+                            radius=T.REL_RADIO, tag="rel:" + clave))
+        return fila
+
+    def _mando(self, icono, tag, col=T.FG, bg=None, ancho=None):
+        """Un boton del reloj: casilla de tamano FIJO con un icono.
+
+        Fijo porque el de arrancar se convierte en el de pausa al
+        pulsarlo: si el boton midiera lo que mide su icono, cambiaria de
+        tamano debajo del dedo y arrastraria a sus vecinos.
+        """
+        return R.Cell(self._ico(icono, 28, col), ancho or T.REL_CELDA,
+                      T.REL_BTN_H, bg=T.SURF_1 if bg is None else bg,
+                      radius=T.REL_RADIO, tag=tag)
+
+    def _boton_play(self, corriendo, tag):
+        """Arrancar o pausar. Azul cuando va a arrancar: es la accion
+        principal del panel, y el azul es lo unico que la isla usa para
+        decir 'esto es lo que vas a pulsar'."""
+        return self._mando("pause" if corriendo else "play", tag,
+                           bg=T.SURF_1 if corriendo else T.ACCENT)
+
+    def _color_tiempo(self, cual, corriendo):
+        """El color de una cuenta: blanco si corre, apagado en pausa. El
+        pomodoro, en el color de su fase, que dice si toca trabajar o
+        parar sin tener que leer nada."""
+        if not corriendo:
+            return T.DIM
+        if cual == "pomo":
+            return T.POMO_COL[self.tiempos.pomo.fase]
+        return T.FG
+
+    def build_crono(self, cr):
+        """Cronometro: las centesimas aparte de los segundos.
+
+        Los segundos son un Rodillo --ruedan, como el reloj- y las
+        centesimas un hueco de ancho fijo que se lee en vivo al dibujar.
+        No es un capricho: cambian cien veces por segundo, y animar eso
+        no se veria, solo costaria. Lo que tiene ritmo de persona rueda;
+        lo que corre, corre.
+        """
+        c = self.tiempos.crono
+        col = T.FG if c.activo else T.DIM
+        # Las centesimas se apoyan en la misma linea que las cifras
+        # grandes. Una fila alinea por el centro, y a mitad de cuerpo
+        # eso las dejaria flotando en el aire.
+        dy = (R.Text("0", T.F_CRONO, col).size(cr)[1]
+              - R.Text("0", T.F_CENT, col).size(cr)[1]) / 2.0
+        cifras = R.Row([
+            R.Rodillo(self._rodillo("crono", c.texto()), T.F_CRONO, col),
+            R.Baja(R.Cifras(lambda: tiempos.centesimas(self.tiempos.crono.valor),
+                            ",00", T.F_CENT, col if c.corriendo else T.DIM),
+                   dy),
+        ])
+        mandos = R.Row([
+            self._boton_play(c.corriendo, "cro:play"),
+            R.Gap(T.REL_GAP),
+            self._mando("reset", "cro:reset", T.FG if c.activo else T.DIM2),
+        ])
+        return R.Stack([cifras, mandos], gap=T.GAP_ROW, center=True)
+
+    def build_temp(self, cr):
+        """Temporizador. Los atajos de minutos estan SIEMPRE, corriendo
+        o no: pulsar uno arranca de cero con esa duracion, que es el
+        gesto con el que se usa esto el 90% de las veces."""
+        t = self.tiempos.temp
+        filas = []
+        if t.activa:
+            col = T.FG if t.corriendo else T.DIM
+            filas.append(R.Row([R.Rodillo(self._rodillo("temp", t.texto()),
+                                          T.F_CRONO, col)]))
+            # La barra lee la fraccion EN VIVO: con el valor guardado al
+            # construir, se quedaria clavada donde estaba al abrir.
+            filas.append(R.Bar(T.REL_ANCHO, T.REL_BARRA,
+                               lambda: self.tiempos.temp.frac,
+                               T.ACCENT if t.corriendo else T.DIM2, T.SURF_2))
+            filas.append(R.Row([
+                self._mando("menos", "tmp:-60"),
+                R.Gap(T.REL_GAP),
+                self._boton_play(t.corriendo, "tmp:play"),
+                R.Gap(T.REL_GAP),
+                # Cancelar, no rebobinar: una cuenta atras que vuelve a
+                # su marca inicial y se queda ahi parada no se puede
+                # quitar de en medio nunca, y el notch seguiria
+                # ensenandola. Volver a ponerla es un clic en su atajo,
+                # que esta justo debajo y ademas sale marcado.
+                self._mando("quita", "tmp:quita"),
+                R.Gap(T.REL_GAP),
+                self._mando("mas", "tmp:+60"),
+            ]))
+        atajos = R.Row()
+        for i, seg in enumerate(C.TEMP_ATAJOS):
+            if i:
+                atajos.add(R.Gap(T.REL_GAP))
+            mins = int(round(seg / 60.0))
+            puesto = t.activa and abs(t.total - seg) < 1.0
+            atajos.add(R.Cell(R.Text(str(mins), T.F_SUB, T.FG),
+                              T.REL_PRE, T.REL_PRE_H,
+                              bg=T.ACCENT if puesto else T.SURF_1,
+                              radius=T.REL_RADIO, tag="tmp:%d" % seg))
+        # La unidad, una sola vez y encima de los atajos. Dentro de cada
+        # chip no cabe ("25 min" por cinco pasa del ancho del panel), y
+        # sin ella un "25" no dice si son minutos o segundos.
+        filas.append(R.Row([R.Text("minutos", T.F_SMALL, T.DIM)]))
+        filas.append(atajos)
+        return R.Stack(filas, gap=T.GAP_ROW - 4, center=True)
+
+    def build_pomo(self, cr):
+        """Pomodoro: la fase manda sobre el color, y los puntos dicen
+        por donde va la tanda."""
+        p = self.tiempos.pomo
+        col = T.POMO_COL[p.fase]
+        apagado = col if p.corriendo else T.DIM
+
+        nombre = R.Text(p.nombre, T.F_SUB, T.FG if p.corriendo else T.DIM)
+        puntos = R.Row()
+        for i in range(p.cada):
+            if i:
+                puntos.add(R.Gap(10))
+            puntos.add(R.Dot(7, col if i < p.hechos else T.SURF_2))
+        # Nombre a la izquierda y puntos a la derecha, con el hueco
+        # calculado: asi la cabecera mide REL_ANCHO exactos y no se
+        # mueve al cambiar "Trabajo" por "Descanso largo".
+        hueco = (T.REL_ANCHO - nombre.size(cr)[0] - puntos.size(cr)[0])
+        cabecera = R.Row([nombre, R.Gap(max(T.GAP_ITEM, hueco)), puntos])
+
+        filas = [
+            cabecera,
+            R.Row([R.Rodillo(self._rodillo("pomo", p.texto()),
+                             T.F_CRONO, T.FG if p.corriendo else T.DIM)]),
+            R.Bar(T.REL_ANCHO, T.REL_BARRA,
+                  lambda: self.tiempos.pomo.cuenta.frac, apagado, T.SURF_2),
+            R.Row([
+                self._boton_play(p.corriendo, "pom:play"),
+                R.Gap(T.REL_GAP),
+                self._mando("skip", "pom:skip"),
+                R.Gap(T.REL_GAP),
+                self._mando("reset", "pom:reset"),
+            ]),
+        ]
+        return R.Stack(filas, gap=T.GAP_ROW, center=True)
+
+    def _reloj_abre(self, tab):
+        """Abre el panel del reloj en una pestana concreta, sin alternar.
+
+        Lo usa el evento externo, que pide VER algo: si alternase, un
+        segundo 'island-send tiempo' cerraria el panel justo cuando
+        acabas de pedir que se vea.
+        """
+        act = self.activities.get("panel")
+        if act is not None and act.data.get("which") == "calendar":
+            self._reloj_ir(tab)
+        else:
+            self._close_panel()
+            self.open_panel("calendar", tab)
+
+    def _reloj_ir(self, tab):
+        """Cambia de pestana sin cerrar el panel."""
+        self.reloj_tab = tab
+        act = self.activities.get("panel")
+        if act is not None:
+            act.data["tab"] = tab
+        if tab == "cal":
+            self.cal_off = 0
+        self._touch_panel()
+        self.refresh()
+
+    def _tiempo_accion(self, tag):
+        """Un mando del reloj. La etiqueta es "<quien>:<que>"."""
+        quien, _, acc = tag.partition(":")
+        t = self.tiempos
+        if quien == "cro":
+            if acc == "play":
+                t.crono.alterna()
+            elif acc == "reset":
+                t.crono.reinicia()
+        elif quien == "tmp":
+            if acc == "play":
+                t.temp.alterna()
+            elif acc in ("quita", "reset"):
+                t.temp.borra()
+            elif acc[:1] in "+-":
+                corria = t.temp.corriendo
+                t.temp.suma(int(acc))
+                # Sumar minutos sin nada en marcha arranca: si no, el
+                # +1 dejaria una cuenta puesta y parada, y habria que
+                # pulsar dos veces para lo mismo.
+                if acc[:1] == "+" and not corria:
+                    t.temp.arranca()
+            else:
+                t.temp.arranca(int(acc))       # un atajo de minutos
+        elif quien == "pom":
+            if acc == "play":
+                t.pomo.alterna()
+            elif acc == "skip":
+                # Saltar no arranca lo que estaba parado: solo cambia de
+                # fase. Si corria, sigue corriendo.
+                t.pomo.avanza(seguir=t.pomo.corriendo)
+            elif acc == "reset":
+                t.pomo.reinicia()
+        self._programa_fin()
+        self._touch_panel()
+        self.refresh()
+
+    def _programa_fin(self):
+        """Un temporizador EXACTO por cada cuenta atras en marcha.
+
+        No vale con mirar el reloj en el bucle de animacion: ese bucle se
+        para en cuanto nada se mueve --que es justo lo que pasa con el
+        notch replegado y una cuenta corriendo- y la alarma llegaria
+        cuando volvieses a mover el raton. Y mirar cada segundo seria
+        despertar al proceso 1500 veces para no hacer nada en 1499.
+        """
+        for cual, cuenta in self.tiempos.cuentas():
+            viejo = self._fin.pop(cual, None)
+            if viejo is not None:
+                GLib.source_remove(viejo)
+            if not (cuenta.activa and cuenta.corriendo):
+                continue
+            # 30 ms de mas: despertar un pelo tarde sobra, y despertar
+            # antes obliga a reprogramar.
+            ms = max(1, int(cuenta.restante * 1000) + 30)
+            self._fin[cual] = GLib.timeout_add(ms, self._acaba, cual)
+
+    def _acaba(self, cual):
+        """Se ha cumplido una cuenta atras."""
+        self._fin.pop(cual, None)
+        cuenta = dict(self.tiempos.cuentas()).get(cual)
+        if cuenta is None or not cuenta.acabada:
+            # GLib puede despertar antes de la cuenta: se reprograma en
+            # vez de dar por terminado algo que no lo esta.
+            self._programa_fin()
+            return False
+
+        if cual == "temp":
+            total = cuenta.total
+            cuenta.pausa()
+            self._suena(C.SONIDO_FIN)
+            self.activities["tiempo"] = Activity(
+                "tiempo", 38, 30.0,
+                {"cual": "temp", "icono": "temp", "color": T.ACCENT,
+                 "titulo": "Se acab\u00f3 el tiempo",
+                 "cuerpo": "Temporizador de %s" % tiempos.mmss(total, True),
+                 "repite": True, "total": total}, "card")
+        else:
+            p = self.tiempos.pomo
+            # La fase siguiente arranca sola. Pararse a esperar un clic
+            # convertiria el descanso en algo que hay que administrar, y
+            # el pomodoro existe para no tener que pensar en el reloj.
+            p.avanza(seguir=True)
+            self._suena(C.SONIDO_FASE)
+            hechos = p.ronda
+            self.activities["tiempo"] = Activity(
+                "tiempo", 38, 8.0,
+                {"cual": "pomo", "icono": "pomo", "color": T.POMO_COL[p.fase],
+                 "titulo": p.nombre,
+                 "cuerpo": "%s \u00b7 %d pomodoro%s" % (
+                     tiempos.mmss(p.cuenta.total, True), hechos,
+                     "" if hechos == 1 else "s")}, "card")
+            self._programa_fin()
+        self.refresh()
+        return False
+
+    def _suena(self, ruta):
+        """El aviso sonoro. Un temporizador que solo avisa en pantalla no
+        sirve: lo pones justo para irte a hacer otra cosa."""
+        if C.SONIDO and ruta and os.path.exists(ruta):
+            self._spawn("%s %s" % (C.SONIDO, shlex.quote(ruta)))
+
+    def _tick_tiempos(self):
+        """Refresca cuando CAMBIA el texto de algun contador.
+
+        El contenido de la isla no se reconstruye por fotograma, asi que
+        las cifras que ruedan necesitan que alguien las ponga al dia; y
+        reconstruir a ciegas cada vez seria medirlo todo con Pango para
+        nada 59 veces de cada 60, que es el mismo argumento por el que
+        el reloj solo se refresca al cambiar el minuto.
+        """
+        cambio = False
+        for cual, texto in self.tiempos.textos().items():
+            if self._ult_t.get(cual) != texto:
+                self._ult_t[cual] = texto
+                cambio = True
+        # Con el notch replegado no se refresca NADA aunque la cuenta
+        # corra: ahi no hay un solo pixel que mirar, y cada refresco
+        # arrastra medio segundo de muelle a 120 Hz. Un pomodoro de 25
+        # minutos despertaria al proceso unas cien mil veces para
+        # dibujar una cifra que nadie ve. Al volver a asomar se pone al
+        # dia de golpe, que es lo que hace _mostrar.
+        if cambio and not self.oculto:
+            self.refresh()
 
     def _results(self, q):
         """Resultados de todos los origenes, ya ordenados.
@@ -2039,9 +2453,14 @@ class Island(Gtk.Window):
                                else "No se pudo pegar"})
         return False
 
-    def open_panel(self, which):
+    def open_panel(self, which, tab=None):
         act = self.activities.get("panel")
         if act is not None and act.data.get("which") == which:
+            if tab is not None and tab != act.data.get("tab"):
+                # Ya esta abierto, pero en otra pestana: lo que se ha
+                # pedido es verla, no cerrar el panel.
+                self._reloj_ir(tab)
+                return
             self._close_panel()                    # el mismo icono cierra
         elif which == "launcher":
             self._start_launcher()                 # necesita teclado
@@ -2053,10 +2472,16 @@ class Island(Gtk.Window):
             # volumen y energia caben en una fila: pildora alta en vez
             # de panel, que reserva padding vertical de tarjeta.
             mode = "pillx" if which in ("volume", "battery") else "panel"
+            datos = {"which": which}
             if which == "calendar":
                 self.cal_off = 0        # se abre siempre en el mes actual
+                # Sin pestana pedida, la ultima que se uso: si estabas
+                # midiendo algo, volver a la hora y tener que buscar otra
+                # vez el cronometro seria el camino largo.
+                self.reloj_tab = tab or self.reloj_tab
+                datos["tab"] = self.reloj_tab
             self.activities["panel"] = Activity(
-                "panel", 50, 8.0, {"which": which}, mode)
+                "panel", 50, 8.0, datos, mode)
             self._grab(Gdk.SeatCapabilities.ALL_POINTING)
             if which == "volume":
                 # Relectura puntual: el sondeo periodico es lento (15 s)
@@ -2595,6 +3020,17 @@ class Island(Gtk.Window):
         if act is not None and act.kind == "dictado" and \
                 (act.data.get("state") or "oyendo") in ("oyendo", "transcribiendo"):
             moving = True
+        # Panel del reloj con una cuenta en marcha: aqui se ven las
+        # centesimas y la barra, asi que hacen falta fotogramas de
+        # verdad. Solo con el panel ABIERTO, que son los segundos en que
+        # lo estas mirando: el panel se cierra solo, y en reposo el
+        # indicador se conforma con el reloj de un segundo.
+        if (act is not None and act.kind == "panel"
+                and act.data.get("which") == "calendar"
+                and act.data.get("tab") in ("crono", "temp", "pomo")
+                and self.tiempos.corriendo(act.data["tab"])):
+            self._tick_tiempos()
+            moving = True
 
         self._damage()
         if not moving:
@@ -2617,9 +3053,17 @@ class Island(Gtk.Window):
         if self._hide_id:
             GLib.source_remove(self._hide_id)
             self._hide_id = None
+        reaparece = self.oculto
         self.oculto = False
         self.sp_y.set(0.0)
         self.ensure_tick()
+        if reaparece and self.tiempos.activos():
+            # Mientras estuvo replegado, las cuentas no se refrescaron.
+            # Se ponen al dia AHORA, antes de que la bajada las ensene:
+            # si no, el cronometro asomaria con la cifra de hace un rato
+            # y daria un salto a la vista.
+            self._ult_t.clear()
+            self._tick_tiempos()
 
     def _quiza_ocultar(self):
         """Repliega solo si no hay nada que ensenar.
@@ -2892,6 +3336,20 @@ class Island(Gtk.Window):
         elif tag in ("vol", "net", "bat", "clock"):
             self.open_panel({"vol": "volume", "net": "wifi",
                              "bat": "battery", "clock": "calendar"}[tag])
+        elif tag.startswith("rel:"):
+            self._reloj_ir(tag[4:])
+        elif tag.startswith(("cro:", "tmp:", "pom:")):
+            self._tiempo_accion(tag)
+        elif tag.startswith("tiempo:"):
+            # El indicador del notch lleva a SU pestana, no al
+            # calendario: vienes de mirar una cuenta, no la fecha.
+            self.open_panel("calendar", tag[7:])
+        elif tag in ("tc:rep", "tc:ok"):
+            act = self.activities.pop("tiempo", None)
+            if tag == "tc:rep" and act is not None:
+                self.tiempos.temp.arranca(act.data.get("total") or 0)
+                self._programa_fin()
+            self.refresh()
         elif tag in ("cal:prev", "cal:next", "cal:hoy"):
             # Navegar NO cierra el panel, a diferencia de elegir perfil o
             # red: aqui el clic es para seguir mirando, no una accion
@@ -2974,7 +3432,8 @@ class Island(Gtk.Window):
                 or tag == "dnd" or tag.startswith("ws")
                 or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
                                    "ds:", "media:", "emo:", "cap:", "pp:",
-                                   "cat:")) or tag == "pw-ver")
+                                   "cat:", "rel:", "cro:", "tmp:", "pom:",
+                                   "tiempo:", "tc:")) or tag == "pw-ver")
 
     def _set_cursor(self, pointer):
         if pointer == self._cursor_ptr:

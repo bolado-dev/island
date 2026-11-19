@@ -6,6 +6,8 @@
   island-send dismiss --target notify
   island-send dictado --state oyendo --value 0.4
   island-send captura --path foto.png --thumb mini.png --text "1280 x 720"
+  island-send tiempo --target temp --value 1500      # 25 min
+  island-send tiempo --target pomo --state play
 """
 import json, os, sys, argparse
 

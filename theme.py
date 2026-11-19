@@ -204,6 +204,21 @@ G_SUN     = ""
 G_MIC_OFF = ""
 G_MIC     = "\uf130"
 G_CHECK   = "\uf00c"
+# Reloj: las cuatro pestanas y los mandos. Comprobados uno a uno en la
+# Iosevka instalada: el cronometro de Font Awesome 5 (f2f2) NO esta en
+# v2, asi que el cronometro lleva la esfera de reloj (f017) y el
+# temporizador el reloj de arena (f252).
+G_CAL     = "\uf073"
+G_CRONO   = "\uf017"
+G_TEMP    = "\uf252"
+G_POMO    = "\uf0f4"      # taza: el pomodoro se cuenta en cafes
+G_PLAY    = "\uf04b"
+G_PAUSE   = "\uf04c"
+G_RESET   = "\uf0e2"
+G_QUITA   = "\uf00d"      # cancelar: una cuenta atras se borra, no se rebobina
+G_SKIP    = "\uf051"
+G_MAS     = "\uf067"
+G_MENOS   = "\uf068"
 
 
 # Perfiles de energia. Iconos en vez de los nombres completos:
@@ -274,6 +289,10 @@ ICON_GLYPH = {
     "media-pause": "\uf04c", "media-next": "\uf051",
     "monocle": "\uf2d0", "balance": "\uf07e", "rotate": "\uf01e",
     "gap-plus": "\uf065", "gap-minus": "\uf066",
+    "cal": G_CAL, "crono": G_CRONO, "temp": G_TEMP, "pomo": G_POMO,
+    "play": G_PLAY, "pause": G_PAUSE, "reset": G_RESET, "skip": G_SKIP,
+    "quita": G_QUITA,
+    "mas": G_MAS, "menos": G_MENOS,
 }
 
 
@@ -423,3 +442,42 @@ G_OJO_NO = ""
 # reloj de aletas, se lee como un fallo.
 SP_ROLL_RESP = 0.44
 SP_ROLL_DAMP = 1.0
+
+# ---------------------------------------------------------------------
+# El panel del reloj: calendario, cronometro, temporizador y pomodoro.
+#
+# Las cuatro pestanas comparten ANCHO, y el que manda es el del
+# calendario (siete columnas de 46), que es el mas ancho de los cuatro.
+# Compartirlo es lo que permite cambiar de pestana sin que la isla de un
+# salto a lo ancho: lo unico que se mueve es el alto. Y todo lo demas
+# --celdas, atajos, barra- se divide a partir de ese ancho, para que
+# ninguna fila sobresalga de otra.
+# ---------------------------------------------------------------------
+REL_ANCHO = 7 * 46
+REL_GAP   = 14
+REL_CELDA = (REL_ANCHO - 3 * REL_GAP) // 4   # 70: cuatro pestanas justas
+REL_TAB_H = 54
+REL_BTN_H = 60
+REL_PRE   = (REL_ANCHO - 4 * REL_GAP) // 5   # 53: cinco atajos de minutos
+REL_PRE_H = 50
+REL_BARRA = 10
+REL_RADIO = 20        # esquinas de los mandos: capsula, no circulo
+
+# (clave, nombre del icono, etiqueta). El orden es el de la barra.
+REL_TABS = (
+    ("cal",   "cal",   "Calendario"),
+    ("crono", "crono", "Cron\u00f3metro"),
+    ("temp",  "temp",  "Temporizador"),
+    ("pomo",  "pomo",  "Pomodoro"),
+)
+
+# Las cifras grandes. 64 px es lo mas grande que deja "88:88:88" (280
+# px) dentro del ancho del calendario; las centesimas van a la mitad,
+# porque son el dato que NO se lee, solo se ve correr.
+F_CRONO = ("Inter Display", "semibold", 64)
+F_CENT  = ("Inter Display", "semibold", 34)
+
+# El color dice en que fase va el pomodoro sin tener que leer: azul es
+# trabajar, verde es parar. Es el mismo criterio que el resto de la
+# isla, donde el verde solo aparece cuando significa algo.
+POMO_COL = {"trabajo": ACCENT, "corto": GREEN, "largo": GREEN}

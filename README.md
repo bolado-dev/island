@@ -103,8 +103,68 @@ te escriben.
 
 **Paneles.** Cada icono de estado abre el suyo: volumen con deslizador real,
 perfiles de energía, redes wifi —con entrada de contraseña dentro del propio
-notch— y un calendario. El reloj abre el calendario; el botón de encendido, el
-menú de sesión.
+notch— y el reloj. El botón de encendido abre el menú de sesión.
+
+<table>
+  <tr>
+    <td><img src="docs/panel-crono.png" alt="Cronómetro: las cifras grandes de los segundos y, a media altura, las centésimas corriendo"></td>
+    <td><img src="docs/panel-temporizador.png" alt="Temporizador: el tiempo restante, una barra de progreso, los botones de menos un minuto, pausa, cancelar y más un minuto, y cinco atajos de minutos con el de 10 marcado"></td>
+    <td><img src="docs/panel-pomodoro.png" alt="Pomodoro: la fase Trabajo con cuatro puntos de tanda, el tiempo restante, la barra y los botones de pausa, saltar fase y reiniciar"></td>
+  </tr>
+</table>
+
+**El reloj tiene cuatro pestañas.** Calendario, cronómetro, temporizador y
+pomodoro. Un reloj que solo enseña la fecha deja fuera justo lo que se le pide
+a un reloj además de la hora: medir, contar hacia atrás y trabajar a tandas.
+
+La barra de pestañas va **arriba**, y no es una preferencia. El notch cuelga
+del borde de la pantalla: su canto de arriba no se mueve jamás y el de abajo
+sube y baja con lo que mida cada pestaña —el calendario ocupa 440 px y el
+cronómetro 300—. Con la barra abajo, pulsar «cronómetro» encogía el panel y se
+llevaba la barra 140 px hacia arriba, fuera de donde acababas de pulsar; el
+segundo clic caía en el escritorio y cerraba el panel. Arriba, las cuatro
+están siempre en el mismo sitio. Y las cuatro miden lo mismo de ancho (el del
+calendario, que es el más ancho), así que cambiar de pestaña solo mueve el
+alto.
+
+**Cronómetro.** Los segundos ruedan como el reloj de la barra; las centésimas,
+no. Cambian cien veces por segundo, así que animarlas no se vería y
+reconstruir el panel a ese ritmo sería medir todo el contenido con Pango cien
+veces por segundo: se leen en vivo al dibujar, en un hueco de ancho fijo. Lo
+que tiene ritmo de persona rueda; lo que corre, corre.
+
+**Temporizador.** Cinco atajos de minutos —un clic y ya está contando—, ±1
+minuto sin perder el ritmo y cancelar. El botón de cancelar borra la cuenta en
+vez de rebobinarla: una cuenta atrás devuelta a su marca y parada no habría
+forma de quitarla de en medio, y el notch seguiría enseñándola.
+
+**Pomodoro.** 25 de trabajo, 5 de descanso y uno largo de 15 cada cuatro, que
+son los números de Cirillo. La fase siguiente arranca sola: pararse a esperar
+un clic convertiría el descanso en algo que administrar, y el pomodoro existe
+para no tener que pensar en el reloj. El color dice en qué fase va —azul
+trabajar, verde parar— y los puntos, por dónde va la tanda.
+
+Mientras algo corre, el notch lo enseña **en reposo**, al lado de la hora, y
+pulsarlo lleva a su pestaña. En pausa también sale, apagado: olvidarse de un
+cronómetro parado es justo lo que ese indicador evita.
+
+Nada de esto gasta con el notch replegado. La cifra solo se refresca si hay
+algo que mirar —replegado no se dibuja ni una vez, y al asomar se pone al día
+de golpe—, y el final de una cuenta no se vigila mirando el reloj cada
+segundo, sino con un temporizador exacto que despierta una sola vez. Medido:
+un temporizador de 25 minutos corriendo cuesta lo mismo que no tener ninguno.
+
+Al acabar suena el aviso del sistema (`SONIDO*` en `config.py`) y baja una
+tarjeta con «Repetir» y «Listo»: un temporizador que solo avisa en pantalla no
+sirve de nada, porque lo pones justo para irte a hacer otra cosa.
+
+También se maneja sin ratón, que es además como está probado:
+
+```sh
+island-send tiempo --target temp --value 1500    # 25 minutos
+island-send tiempo --target crono --state play
+island-send tiempo --target pomo --state skip
+```
 
 <p align="center">
   <img src="docs/launcher.png" alt="Lanzador: campo de búsqueda, resultado destacado en grande con su icono y tipo, y debajo la lista con el tipo de cada resultado alineado a la derecha" width="620">
@@ -684,8 +744,9 @@ La regla va **la última**: en dunst gana la última que casa.
 ## Configuración
 
 `config.py` tiene lo que cambia de una máquina a otra — comando de bloqueo,
-terminal, mezclador, nombres de las interfaces de red. `theme.py` tiene el
-aspecto: colores, tamaños, tipografías y las constantes del auto-ocultado.
+terminal, mezclador, nombres de las interfaces de red, los atajos de minutos
+del temporizador y las duraciones del pomodoro. `theme.py` tiene el aspecto:
+colores, tamaños, tipografías y las constantes del auto-ocultado.
 
 Los perfiles de energía esperan un script que fije el EPP de `intel_pstate` y
 una regla en `/etc/sudoers.d` que lo permita sin contraseña. Si no existe, el

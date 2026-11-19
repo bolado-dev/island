@@ -238,6 +238,54 @@ class Rodillo(object):
             x += cw
 
 
+class Cifras(object):
+    """Cifras que se leen EN VIVO al dibujar, en un hueco de ancho fijo.
+
+    Las centesimas de un cronometro cambian cien veces por segundo.
+    Reconstruir el contenido para moverlas seria volver a medir con
+    Pango el panel entero cien veces por segundo, asi que el texto sale
+    de una funcion al dibujar --igual que la barra lee su muelle- y el
+    hueco mide lo que mida 'molde', que es el caso mas ancho. Con el
+    ancho fijado por el molde, la isla no se reajusta con cada centesima.
+
+    Lo que cambia a ritmo de PERSONA (los segundos) no se dibuja aqui:
+    eso es un Rodillo, porque ahi si hay un cambio que merece animarse.
+    """
+    def __init__(self, fn, molde, font, color, tag=None):
+        self.fn, self.molde = fn, molde
+        self.font, self.color, self.tag = font, color, tag
+
+    def _molde(self):
+        return Text(self.molde, self.font, self.color, feats=TNUM)
+
+    def size(self, cr):
+        return self._molde().size(cr)
+
+    def draw(self, cr, x, cy, a):
+        w, h = self.size(cr)
+        if self.tag:
+            _record(self.tag, x, cy, w, h)
+        Text(self.fn(), self.font, self.color, feats=TNUM).draw(cr, x, cy, a)
+
+
+class Baja(object):
+    """Baja a su hijo unos pixeles sin cambiar lo que ocupa.
+
+    Para que las centesimas del cronometro se apoyen en la misma linea
+    que las cifras grandes: una fila alinea por el CENTRO, y un texto a
+    mitad de cuerpo centrado al lado de otro mas grande parece flotar en
+    el aire en vez de ir detras de el.
+    """
+    def __init__(self, hijo, dy):
+        self.hijo, self.dy = hijo, dy
+
+    def size(self, cr):
+        return self.hijo.size(cr)
+
+    def draw(self, cr, x, cy, a):
+        self.hijo.draw(cr, x, cy + self.dy, a)
+
+
 class Image(object):
     """Icono de aplicacion o caratula.
 
@@ -369,11 +417,14 @@ def _frac(v):
     El contenido de la isla no se reconstruye en cada fotograma --solo
     se repinta-, asi que un numero guardado al construir se queda
     congelado: la barra marcaria el valor que tenia al llegar el evento
-    y no se moveria nunca. Aceptando el muelle en vez de su valor, el
-    dibujado lee el de ESTE fotograma. Es lo mismo que hace la onda del
-    dictado con la lista de niveles.
+    y no se moveria nunca. Aceptando el muelle --o una funcion- en vez
+    de su valor, el dibujado lee el de ESTE fotograma. Es lo mismo que
+    hace la onda del dictado con la lista de niveles.
     """
-    x = v.value if hasattr(v, "value") else v
+    if callable(v):
+        x = v()
+    else:
+        x = v.value if hasattr(v, "value") else v
     return max(0.0, min(1.0, x))
 
 

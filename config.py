@@ -177,3 +177,31 @@ PANEL_TECLA = {
     "emoji":        "period",
     "portapapeles": "v",
 }
+
+# ----------------------------------------------- reloj: crono y pomodoro
+# El panel del reloj (clic en la hora) lleva cronometro, temporizador y
+# pomodoro. Aqui van las duraciones y el aviso, que es lo unico que
+# cambia de una persona a otra.
+
+# Atajos de minutos del temporizador, en segundos. Cinco: los que caben
+# en el ancho del calendario sin apretar.
+TEMP_ATAJOS = (60, 300, 600, 1500, 3600)
+
+# Pomodoro clasico: 25 de trabajo, 5 de descanso y uno largo de 15 cada
+# cuatro. Son los numeros de Cirillo, que es lo que espera cualquiera
+# que haya oido la palabra.
+POMO_TRABAJO = 25 * 60
+POMO_CORTO   = 5 * 60
+POMO_LARGO   = 15 * 60
+POMO_CADA    = 4
+
+# Aviso al acabar una cuenta atras. Un temporizador que solo avisa en
+# pantalla no sirve para nada: lo pones justo para irte a hacer otra
+# cosa.
+#
+# El reproductor se invoca con el fichero como unico argumento. Vacio
+# ("") deja el aviso en silencio, y si el fichero no existe tampoco se
+# intenta: no hay nada que romper.
+SONIDO       = "pw-play"
+SONIDO_FIN   = "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"
+SONIDO_FASE  = "/usr/share/sounds/freedesktop/stereo/complete.oga"
