@@ -105,8 +105,9 @@ pintarlo, y la urgencia crítica pinta en rojo.
   derecha de la tarjeta, dos como mucho — es un aviso que se va solo en cinco
   segundos, no un diálogo. Las que no son una decisión tuya sino el cajón de
   sastre de siempre —la rueda de ajustes que Chrome mete en **toda**
-  notificación web— se pintan como icono suelto y no cuentan para el tope: si
-  no, el botón que nunca vas a pulsar se come un hueco y empuja el mensaje. Al pulsar uno se emite `ActionInvoked` y la
+  notificación web— no se pintan: en una tarjeta que dura cinco segundos
+  ocupaban sitio para algo que nadie pulsa, y los ajustes del sitio están en
+  el navegador, que es donde se buscan. Al pulsar uno se emite `ActionInvoked` y la
   notificación se cierra, que es lo que dice el spec y lo que espera quien la
   mandó; salvo que se declare `resident`, que es como una aplicación dice
   «este botón no termina la historia».
@@ -123,9 +124,13 @@ pintarlo, y la urgencia crítica pinta en rojo.
   perdido en el cuerpo hay que leerlo, una barra no.
 
 ```
-  [foto]  Ana García                    [Me gusta] [Silenciar]
-          te ha mencionado en #general
+  [ foto ]  Ana García                  [Me gusta] [Silenciar]
+  [ 72px ]  te ha mencionado en #general
 ```
+
+El avatar se pinta a 72 px y pegado al texto: es la cara de quien escribe y
+es lo primero que se mira, así que no tiene sentido que ocupe lo mismo que
+el icono de una aplicación cualquiera.
 
 A cambio, mientras la isla no esté no hay notificaciones — igual que antes,
 porque dunst ya estaba con `skip_display = true` y sin la isla tampoco se veía

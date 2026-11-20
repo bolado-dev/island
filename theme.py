@@ -603,14 +603,18 @@ GLOW_PULSO_FPS  = 30.0
 # sola en cinco segundos, no un dialogo, y con tres la isla se pone mas
 # ancha que la pantalla util.
 NOTI_BOTONES = 2
-# Acciones que no son una decision tuya sino el cajon de sastre de
-# siempre: Chrome mete una rueda de ajustes en TODA notificacion web, y
-# con texto se come uno de los dos huecos para algo que no vas a pulsar.
-# Se pintan como icono suelto y no cuentan para el tope.
-NOTI_ACC_ICONO = {
-    "settings": "ajustes", "preferences": "ajustes", "config": "ajustes",
-    "configuracion": "ajustes", "configuraci\u00f3n": "ajustes",
-}
+# Acciones que NO se pintan. Chrome mete una rueda de ajustes en toda
+# notificacion web: no es una decision tuya sobre el aviso, es el cajon
+# de sastre de siempre, y en una tarjeta que dura cinco segundos ocupa
+# sitio para algo que nadie pulsa. Los ajustes del sitio estan en el
+# navegador, que es donde se buscan.
+NOTI_ACC_FUERA = ("settings", "preferences", "config", "configuracion",
+                  "configuraci\u00f3n")
+
+# El avatar de una notificacion. Grande: es la cara de quien escribe y
+# es lo primero que se mira. La tarjeta mide H_CARD (112), asi que 72
+# deja 20 de aire arriba y abajo.
+NOTI_AVATAR = 72
 NOTI_CAMPO   = 320    # ancho del campo de respuesta
 NOTI_BARRA   = 300    # ancho de la barra de progreso de un aviso
 G_SEND       = ""

@@ -307,7 +307,8 @@ class Island(Gtk.Window):
         self.notis = None
         if C.SERVIDOR_NOTIS:
             notificaciones.para_dunst()
-            self.notis = notificaciones.Servidor(self.on_event)
+            self.notis = notificaciones.Servidor(self.on_event,
+                                                 lado=T.NOTI_AVATAR)
 
         if os.environ.get("ISLAND_DEBUG"):
             GLib.timeout_add_seconds(1, self._prof_dump)
@@ -666,7 +667,8 @@ class Island(Gtk.Window):
             # pintar es apostar contra el reloj.
             ruta = ev.get("icon") or ""
             if ruta.startswith("/") and os.path.exists(ruta):
-                pb = sources.load_icon(ruta, 52, ev.get("app", ""))
+                pb = sources.load_icon(ruta, T.NOTI_AVATAR,
+                                       ev.get("app", ""))
                 if pb is not None:
                     ev["pix"] = pb
                     ev["propio"] = True
@@ -712,7 +714,7 @@ class Island(Gtk.Window):
                 self.refresh()
             return False
 
-        sources.fetch_favicon(dom, 52, got)
+        sources.fetch_favicon(dom, T.NOTI_AVATAR, got)
 
     def current(self):
         now = time.monotonic()
@@ -1203,13 +1205,15 @@ class Island(Gtk.Window):
         # campana. El favicon ya dice de que servicio es, asi que el
         # texto queda libre para el CONTENIDO (quien escribe y que dice)
         # en vez de gastar la primera linea repitiendo el nombre.
-        pb = d.get("pix") or sources.load_icon(d.get("icon"), 52,
+        pb = d.get("pix") or sources.load_icon(d.get("icon"), T.NOTI_AVATAR,
                                                d.get("app", ""))
         # Redonda del todo si es la foto de un contacto, y con las
         # esquinas de un icono de app si es un icono de app: una foto
         # recortada en cuadrado parece un icono mal hecho, y un icono
         # metido en un circulo pierde su forma.
-        head = (R.Image(pb, 52, radius=26 if d.get("redondo") else None)
+        head = (R.Image(pb, T.NOTI_AVATAR,
+                        radius=T.NOTI_AVATAR / 2.0 if d.get("redondo")
+                        else None)
                 if pb is not None
                 else self._ico("bell", 34, acc, T.G_BELL))
         title = d.get("title") or d.get("app", "")
@@ -1224,14 +1228,13 @@ class Island(Gtk.Window):
         # --la rueda de ajustes que Chrome mete en TODA notificacion
         # web- van como icono suelto. Si no, el boton que nunca vas a
         # pulsar se come uno de los dos huecos y empuja el mensaje.
-        grandes, chicas = [], []
+        grandes = []
         for i, (clave, etiqueta) in enumerate(d.get("acciones") or []):
-            icono = T.NOTI_ACC_ICONO.get((clave or "").strip().lower())
-            if icono:
-                chicas.append((i, icono))
-            elif len(grandes) < T.NOTI_BOTONES:
+            if (clave or "").strip().lower() in T.NOTI_ACC_FUERA:
+                continue
+            if len(grandes) < T.NOTI_BOTONES:
                 grandes.append((i, etiqueta))
-        acciones = grandes + chicas
+        acciones = grandes
         respondiendo = (self.resp is not None
                         and self.resp.get("id") == d.get("id"))
 
@@ -1246,7 +1249,7 @@ class Island(Gtk.Window):
             rows.append(R.Bar(T.NOTI_BARRA, 8, d["valor"] / 100.0, acc,
                               T.SURF_2))
 
-        fila = R.Row().add(head, R.Gap(20),
+        fila = R.Row().add(head, R.Gap(16),
                            R.Row([R.Stack(rows, gap=6)],
                                  tag="noti-def" if d.get("defecto") else None))
 
@@ -1276,16 +1279,6 @@ class Island(Gtk.Window):
             botones.add(R.Chip(self._clip(etiqueta, 14), T.F_SMALL, T.FG,
                                T.ACCENT if self.hover == tag else T.SURF_1,
                                tag=tag, padx=18, pady=12))
-        for i, icono in chicas:
-            tag = "noti:%d" % i
-            if botones.items:
-                botones.add(R.Gap(8))
-            botones.add(R.Chip("", T.F_SMALL, T.FG,
-                               T.ACCENT if self.hover == tag else T.SURF_1,
-                               tag=tag, padx=13, pady=12,
-                               icon=self._ico(icono, 22,
-                                              T.FG if self.hover == tag
-                                              else T.DIM)))
         if botones.items:
             fila.add(R.Gap(T.GAP_GROUP), botones)
         return fila
