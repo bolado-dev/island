@@ -90,6 +90,19 @@ y la URL de origen contra una lista de patrones. Si casa, se baja el favicon
 **del propio sitio** — no de un servicio de terceros, que sabría qué páginas
 te escriben.
 
+Pero el favicon es el último recurso. Chrome escribe el icono que manda la
+página —en WhatsApp, **la foto de quien te escribe**— en un fichero temporal
+propio de cada notificación, y ese manda: un logo verde idéntico en todos los
+avisos dice mucho menos que la cara de quien te habla. Se lee en cuanto llega
+el evento y no al dibujar, porque Chrome borra ese fichero al cerrar la
+notificación. Y va en círculo, no en cuadrado con las esquinas de un icono de
+app: una foto recortada en cuadrado parece un icono mal hecho.
+
+Del cuerpo se quita además **el origen**. Chrome lo mete dentro: lo que llega
+es «web.whatsapp.com», una línea en blanco y, al final, el mensaje — así que
+media línea útil se la comía un dato que ya dicen el nombre y el icono de la
+tarjeta.
+
 <table>
   <tr>
     <td><img src="docs/resplandor-notificacion.png" alt="Una notificación de Telegram con un halo azul cian alrededor del notch, del color del icono"></td>

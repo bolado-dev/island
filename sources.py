@@ -948,7 +948,12 @@ def vpn_label():
 # ------------------------------------------------------- iconos e imagenes
 
 ART_CACHE = os.path.expanduser("~/.cache/island/art")
+# Iconos ya resueltos. Con tope: la clave lleva la ruta, y Chrome
+# escribe el icono de CADA notificacion web en un temporal distinto, asi
+# que sin limite la cache crece una entrada por notificacion recibida y
+# no vuelve a acertar ninguna.
 _icon_cache = {}
+_ICON_MAX = 64
 
 
 def _from_path(path, size):
@@ -1007,6 +1012,8 @@ def load_icon(spec, size, appname=""):
         if pb is not None:
             break
 
+    if len(_icon_cache) >= _ICON_MAX:
+        _icon_cache.clear()
     _icon_cache[key] = pb
     return pb
 
@@ -1140,6 +1147,47 @@ def fetch_favicon(domain, size, done):
 # ------------------------------------------------------- limpieza de marcado
 
 _TAG_RE = None
+
+
+def sin_origen(cuerpo, dominio):
+    """Quita del cuerpo la linea del sitio de origen.
+
+    Chrome mete el origen DENTRO del cuerpo de toda notificacion web:
+    lo que llega es "web.whatsapp.com", una linea en blanco y, al
+    final, el mensaje. Al pintarlo todo seguido, la mitad de la linea
+    util se la comia un dato que ya dicen el nombre y el icono de la
+    tarjeta.
+
+    Si al quitarlo no queda nada --notificaciones que SOLO traen el
+    origen- se devuelve lo que habia: mas vale repetir el sitio que
+    dejar la tarjeta muda.
+    """
+    if not cuerpo or not dominio:
+        return cuerpo
+    d = dominio.rstrip("/")
+    formas = []
+    for esquema in ("", "http://", "https://"):
+        formas += [esquema + d, esquema + d + "/"]
+    bajas = {f.lower() for f in formas}
+
+    # Por lineas, que es como lo manda Chrome...
+    quedan = [l.strip() for l in cuerpo.split("\n")]
+    quedan = [l for l in quedan if l and l.lower() not in bajas]
+    limpio = "\n".join(quedan)
+
+    # ...y por delante, que es como queda cuando alguien ya ha juntado
+    # las lineas en una sola. sanitize() colapsa los saltos antes de
+    # que esto llegue a mirarlos, asi que hacen falta las dos formas.
+    for f in sorted(formas, key=len, reverse=True):
+        if limpio.lower().startswith(f.lower()):
+            sig = limpio[len(f):len(f) + 1]
+            if sig and (sig.isalnum() or sig in "._-"):
+                continue      # "web.whatsapp.com.mx": es otro dominio
+            resto = limpio[len(f):].lstrip(" \u00b7-\u2013\u2014:")
+            if resto:
+                limpio = resto
+            break
+    return limpio or cuerpo
 
 
 def sanitize(s):

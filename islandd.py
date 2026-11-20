@@ -631,6 +631,17 @@ class Island(Gtk.Window):
             ev["title"] = sources.sanitize(ev.get("title"))
             ev["body"] = sources.sanitize(ev.get("body"))
             ev["app"] = sources.sanitize(ev.get("app"))
+            # El icono que manda la aplicacion se lee AHORA, no al
+            # dibujar. Chrome escribe el de cada notificacion web en un
+            # directorio temporal propio --en WhatsApp es la foto de
+            # quien escribe- y lo borra al cerrarla, asi que esperar a
+            # pintar es apostar contra el reloj.
+            ruta = ev.get("icon") or ""
+            if ruta.startswith("/") and os.path.exists(ruta):
+                pb = sources.load_icon(ruta, 52, ev.get("app", ""))
+                if pb is not None:
+                    ev["pix"] = pb
+                    ev["propio"] = True
             self._enrich(ev)
         if kind == "music" and not ev.get("title"):
             self.activities.pop("music", None)
@@ -653,6 +664,17 @@ class Island(Gtk.Window):
         ev["app"] = rule.get("name") or ev.get("app")
         dom = rule.get("domain")
         if not dom:
+            return
+
+        # Fuera el origen del cuerpo: ya lo dicen el nombre y el icono.
+        ev["body"] = sources.sin_origen(ev.get("body"), dom)
+
+        if ev.get("propio"):
+            # La notificacion trae SU imagen: en WhatsApp, la foto de
+            # quien escribe. Esa manda sobre el favicon del sitio --un
+            # logo verde identico en todos los avisos dice mucho menos
+            # que la cara de quien te habla-, asi que ni se baja.
+            ev["redondo"] = True
             return
 
         def got(pb):
@@ -1155,7 +1177,12 @@ class Island(Gtk.Window):
         # en vez de gastar la primera linea repitiendo el nombre.
         pb = d.get("pix") or sources.load_icon(d.get("icon"), 52,
                                                d.get("app", ""))
-        head = (R.Image(pb, 52) if pb is not None
+        # Redonda del todo si es la foto de un contacto, y con las
+        # esquinas de un icono de app si es un icono de app: una foto
+        # recortada en cuadrado parece un icono mal hecho, y un icono
+        # metido en un circulo pierde su forma.
+        head = (R.Image(pb, 52, radius=26 if d.get("redondo") else None)
+                if pb is not None
                 else self._ico("bell", 34, acc, T.G_BELL))
         title = d.get("title") or d.get("app", "")
         body = d.get("body") or ""
