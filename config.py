@@ -205,3 +205,23 @@ POMO_CADA    = 4
 SONIDO       = "pw-play"
 SONIDO_FIN   = "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"
 SONIDO_FASE  = "/usr/share/sounds/freedesktop/stereo/complete.oga"
+
+# ------------------------------------------------- notificaciones
+# Que la isla sea el servidor de notificaciones del escritorio: toma
+# org.freedesktop.Notifications en D-Bus y recibe los avisos de primera
+# mano, en vez de que se los pase otro demonio.
+#
+# Es lo unico que permite enseñar el AVATAR de quien escribe: Electron
+# (Discord, Slack, Signal) manda la imagen como pixeles dentro de la
+# propia llamada, y un relevo como dunst la guarda para dibujarla sin
+# pasarsela a nadie; y Chrome manda la ruta de un temporal que borra
+# antes de que al relevo le de tiempo a leerlo.
+#
+# A True se aparta a dunst al arrancar (pkill). Para volver atras:
+# pon esto a False y descomenta 'dunst &' en tu bspwmrc.
+SERVIDOR_NOTIS = True
+
+# Aplicaciones cuyas notificaciones se tiran: la isla ya enseña eso
+# mismo de otra forma. Son los OSD de volumen y brillo, que llaman a
+# island-send y dejan notify-send de respaldo por si la isla no esta.
+NOTIS_IGNORA = ("volumen", "brillo", "volume", "brightness")

@@ -31,6 +31,7 @@ import render as R
 from spring import Spring
 import sources
 import controls
+import notificaciones
 import tiempos
 import config as C
 
@@ -209,7 +210,7 @@ class Island(Gtk.Window):
         self.reloj_tab = "cal"
         self._fin = {}            # temporizadores exactos de fin de cuenta
         self._ult_t = {}          # ultimo texto visto de cada contador
-        self.dnd = False          # dunst en pausa
+        self.dnd = False          # no molestar
         self.oculto = False
         self._hide_id = None
         # None hasta el primer informe de bspwm: asi el notch no se
@@ -297,6 +298,15 @@ class Island(Gtk.Window):
         self.sp_rec = Spring(0.0, response=0.34, damping=0.70, escala=0.01)
         self._cursor_ptr = None
         self.fifo = sources.Fifo(sources.FIFO, self.on_event)
+
+        # Servidor de notificaciones. La isla toma el nombre de D-Bus y
+        # recibe los avisos de primera mano: es la unica forma de tener
+        # el avatar, porque un relevo pierde los pixeles que manda
+        # Electron y llega tarde al temporal que escribe Chrome.
+        self.notis = None
+        if C.SERVIDOR_NOTIS:
+            notificaciones.para_dunst()
+            self.notis = notificaciones.Servidor(self.on_event)
 
         if os.environ.get("ISLAND_DEBUG"):
             GLib.timeout_add_seconds(1, self._prof_dump)
@@ -409,9 +419,20 @@ class Island(Gtk.Window):
             self.refresh()
         return True
 
+    def _dnd_lee(self):
+        """El "no molestar", de donde toque.
+
+        Siendo nosotros el servidor es un booleano nuestro; con dunst
+        delante habia que preguntarselo a el por dunstctl, que son dos
+        procesos cada vez que se refresca el sistema.
+        """
+        if self.notis is not None:
+            return self.notis.pausado
+        return controls.dnd_paused()
+
     def _tick_sys(self):
         self.sys.refresh()
-        self.dnd = controls.dnd_paused()
+        self.dnd = self._dnd_lee()
         self._sync_persistent()
         self.refresh()
         return True
@@ -3533,8 +3554,11 @@ class Island(Gtk.Window):
             return True
 
         if tag == "dnd" or tag == "ds:dnd":
-            controls.dnd_toggle()
-            self.dnd = controls.dnd_paused()
+            if self.notis is not None:
+                self.notis.alterna_pausa()
+            else:
+                controls.dnd_toggle()
+            self.dnd = self._dnd_lee()
             self.refresh()
         elif tag.startswith("ws"):
             # Clic izquierdo en un segmento: saltar a ese escritorio, que

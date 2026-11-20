@@ -79,10 +79,32 @@ mosaico (monocle, equilibrar, rotar, separación, no molestar).
   <img src="docs/notification.gif" alt="Una notificación hace que el notch se despliegue en tarjeta con el icono de la aplicación, el título y el cuerpo, y luego vuelva a replegarse" width="760">
 </p>
 
-**Notificaciones.** Entran por una regla de dunst, que deja de pintar su
-propia burbuja y se las pasa al notch. El icono sale del tema de iconos o del
-que mande la aplicación; el marcado HTML del cuerpo se limpia antes de
-pintarlo.
+**Notificaciones.** La isla **es** el servidor de notificaciones: toma
+`org.freedesktop.Notifications` en D-Bus y las recibe de primera mano. No hay
+dunst en medio, ni script, ni `dunstctl history | jq` para averiguar de qué
+web venía cada aviso — eso ahora llega dentro de la llamada.
+
+Antes sí lo había, y el relevo perdía justo lo que importa. Medido con las dos
+formas reales:
+
+- **Electron** (Discord, Slack, Signal) manda el avatar como **píxeles**
+  dentro de la propia llamada, en la pista `image-data`. dunst la guarda en
+  memoria para dibujarla y no se la pasa a los scripts: al hook le llegaba el
+  icono **vacío**.
+- **Chrome** manda la ruta de un fichero temporal **que borra enseguida**.
+  Cuando dunst ejecutaba el script, ya no existía — de ahí que todas las
+  notificaciones de WhatsApp salieran con el mismo logo verde.
+
+Recibiendo la llamada no hay nada que perder: los píxeles vienen dentro y el
+fichero se lee en el acto. El marcado HTML del cuerpo se limpia antes de
+pintarlo, y la urgencia crítica pinta en rojo.
+
+A cambio, mientras la isla no esté no hay notificaciones — igual que antes,
+porque dunst ya estaba con `skip_display = true` y sin la isla tampoco se veía
+nada. `launch.sh` la levanta si se cae, y si algo activa a dunst por D-Bus
+mientras tanto, la isla le quita el nombre al volver. Para desandarlo:
+`SERVIDOR_NOTIS = False` en `config.py` y descomentar `dunst &` en tu
+`bspwmrc`.
 
 Para las notificaciones web hay reglas en `apps.json`: Chrome manda todas las
 suyas como «Google Chrome», así que se cruzan el nombre, el título, el cuerpo
@@ -679,8 +701,9 @@ pieza pegada encima.
 
 **Eventos.** Un FIFO en `$XDG_RUNTIME_DIR`, una línea JSON por evento, y un
 cliente (`island-send`) para escribir en él. Todo lo que no sea estado del
-sistema entra por ahí: la regla de dunst, los scripts de volumen y brillo, y
-cualquier cosa que quieras añadir tú.
+sistema entra por ahí: los scripts de volumen y brillo, las capturas, y
+cualquier cosa que quieras añadir tú. (Las notificaciones ya no: esas llegan
+por D-Bus, directas.)
 
 ```sh
 island-send notify --app "CI" --body "build #284 · 2 min 14 s"
@@ -741,7 +764,7 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-rsvg-2.0
 ```
 
 Opcionales, según lo que quieras que funcione: `playerctl` (reproducción),
-`nmcli` (wifi), `wpctl` de PipeWire (volumen), `dunst` (notificaciones),
+`nmcli` (wifi), `wpctl` de PipeWire (volumen),
 `xclip` (copiar desde la calculadora), `unicode-data` más
 `fonts-noto-color-emoji` para el selector de emoji, que sin la lista del
 sistema te dice que falta en vez de abrirse vacío, y `scrot` para las capturas
@@ -839,7 +862,14 @@ En tu `bspwmrc`:
 ~/.config/island/launch.sh &
 ```
 
-Y para que las notificaciones lleguen, al final de tu `dunstrc`:
+Las notificaciones no necesitan nada más: la isla toma el nombre de D-Bus al
+arrancar y aparta a quien lo tuviera. Si usabas dunst, **quítalo del
+autoarranque** (`dunst &` en tu `bspwmrc`) o volverá a pelearse por el nombre
+en cada sesión.
+
+Si prefieres mantener dunst delante, pon `SERVIDOR_NOTIS = False` en
+`config.py` y añade al final de tu `dunstrc` la regla de siempre, que sigue en
+el repo:
 
 ```ini
 [isla]
@@ -848,7 +878,8 @@ Y para que las notificaciones lleguen, al final de tu `dunstrc`:
     skip_display = true
 ```
 
-La regla va **la última**: en dunst gana la última que casa.
+La regla va **la última**: en dunst gana la última que casa. Por ahí no hay
+avatar —es lo que se explica arriba—, pero todo lo demás funciona igual.
 
 ## Configuración
 
