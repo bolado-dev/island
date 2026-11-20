@@ -558,15 +558,15 @@ el foco puede cambiar solo —una notificación, un gesto del ratón— y el tex
 acabaría escrito en cualquier parte. Al soltar, el texto va a la ventana que
 tenías delante cuando empezaste.
 
-**El notch avisa de que el dictado está disponible.** Cuando el foco entra en
-una ventana de una IA aparece en reposo **su logo en blanco** junto a la
-palabra «Dictado», y se va cuando el foco sale. Mismo criterio que el «no
-molestar»:
-aparece solo cuando significa algo, porque un icono permanente para un estado
-que casi siempre está apagado es ruido fijo. El foco se consulta cuando
-cambia (`bspc subscribe node_focus`), no en bucle: recorrer el árbol de
-procesos cada pocos segundos para un indicador que casi nunca cambia sería
-gastar batería en nada.
+**Sabe qué ventana tienes delante**, y se consulta cuando el foco cambia
+(`bspc subscribe node_focus`), no en bucle: recorrer el árbol de procesos cada
+pocos segundos para algo que casi nunca cambia sería gastar batería en nada.
+Hubo un tiempo en que eso se enseñaba —el logo de la IA y la palabra
+«Dictado» en reposo, al entrar el foco en una sesión de Claude Code—, y se
+quitó: el dictado se lanza con su atajo, lo sepa o no el notch, y lo único que
+hacía ese chip era que la fila cambiase de ancho al cambiar de ventana. El
+foco se sigue mirando para otra cosa: para no avisarte de que una IA ha
+terminado justo cuando la estás mirando.
 
 **Reconoce qué IA tienes delante y enseña su logo**, no su nombre: un logo se
 reconoce de un vistazo y no hay que leerlo, que es lo que se necesita de algo

@@ -294,7 +294,6 @@ class Island(Gtk.Window):
         self.sp_nivel = Spring(0.0, response=T.SP_NIVEL_RESP,
                                damping=T.SP_NIVEL_DAMP, escala=0.01)
         self._nivel_de = None      # de que es el nivel que lleva dentro
-        self.sp_mic = Spring(0.0, response=0.34, damping=0.70, escala=0.01)
         self.sp_rec = Spring(0.0, response=0.34, damping=0.70, escala=0.01)
         self._cursor_ptr = None
         self.fifo = sources.Fifo(sources.FIFO, self.on_event)
@@ -841,26 +840,14 @@ class Island(Gtk.Window):
         row.add(ws)
 
         row.add(R.Gap(T.GAP_GROUP))
-        # Dictado disponible. Mismo criterio que el "no molestar" de
-        # abajo: aparece solo cuando significa algo. Un icono permanente
-        # para un estado que casi siempre esta apagado es ruido fijo.
-        quiere = 1.0 if self.foco.ia else 0.0
-        if self.sp_mic.target != quiere:
-            self.sp_mic.set(quiere)
-            self.ensure_tick()
-        if self.sp_mic.value > 0.01 or self.foco.ia:
-            # El logo de la IA, en blanco como el resto de iconos de
-            # estado, y "Dictado" al lado para que la primera vez se
-            # entienda que el logo no es decoracion sino que indica
-            # donde va a caer lo que digas.
-            logo = self.foco.ia or "claude"
-            row.add(R.Row([R.Alfa(R.Row([
-                R.Icon("ia-" + logo, 22, T.FG, T.G_MIC, T.F_SMALL),
-                R.Gap(8),
-                R.Text("Dictado", T.F_SMALL, T.DIM),
-            ]), self.sp_mic)], tag="dictado"))
-            row.add(R.Gap(T.GAP_GROUP))
-            self._mic_en_fila = True
+        # Aqui vivia un aviso de "dictado disponible" --el logo de la IA
+        # y la palabra- cuando la ventana de delante era una sesion de
+        # Claude Code o de Gemini. Fuera: el dictado se lanza con su
+        # atajo, lo sepa o no el notch, y lo unico que hacia ese chip
+        # era que la fila cambiara de ancho al cambiar de ventana. El
+        # foco se sigue mirando, pero para otra cosa: para no avisarte
+        # de que una IA ha terminado cuando la estas mirando.
+        #
         # Micro abierto por OTRO programa. Se queda mientras dure, no
         # unos segundos: lo que importa de esto no es el aviso, es poder
         # mirar el notch y saber si te estan escuchando.
@@ -3122,19 +3109,18 @@ class Island(Gtk.Window):
                 # los dos y la cifra se queda con un hueco delante.
                 c.previo = c.actual
 
-        # Indicador de dictado. Se mira aparte del resto para enterarse
-        # de CUANDO se asienta: mientras se desvanece sigue ocupando su
-        # sitio en la fila, asi que el notch no puede encogerse hasta
-        # que desaparece del todo, y eso pide una reconstruccion.
+        # Indicador de microfono abierto. Se mira aparte del resto para
+        # enterarse de CUANDO se asienta: mientras se desvanece sigue
+        # ocupando su sitio en la fila, asi que el notch no puede
+        # encogerse hasta que desaparece del todo, y eso pide una
+        # reconstruccion.
         act = self.current()
-        for muelle, bandera in ((self.sp_mic, "_mic_en_fila"),
-                                (self.sp_rec, "_rec_en_fila")):
-            movio = muelle.step(dt)
-            moving |= movio
-            if (not movio and muelle.target == 0.0
-                    and getattr(self, bandera, False)):
-                setattr(self, bandera, False)
-                self.refresh()
+        movio = self.sp_rec.step(dt)
+        moving |= movio
+        if (not movio and self.sp_rec.target == 0.0
+                and getattr(self, "_rec_en_fila", False)):
+            self._rec_en_fila = False
+            self.refresh()
 
         # La onda persigue a los niveles que manda el microfono. Llegan
         # doce veces por segundo y esto corre a sesenta: sin perseguir,
