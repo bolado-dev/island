@@ -295,6 +295,7 @@ ICON_GLYPH = {
     "play": G_PLAY, "pause": G_PAUSE, "reset": G_RESET, "skip": G_SKIP,
     "quita": G_QUITA,
     "mas": G_MAS, "menos": G_MENOS, "send": "\uf1d8",
+    "ajustes": "\uf013",
 }
 
 
@@ -602,6 +603,14 @@ GLOW_PULSO_FPS  = 30.0
 # sola en cinco segundos, no un dialogo, y con tres la isla se pone mas
 # ancha que la pantalla util.
 NOTI_BOTONES = 2
+# Acciones que no son una decision tuya sino el cajon de sastre de
+# siempre: Chrome mete una rueda de ajustes en TODA notificacion web, y
+# con texto se come uno de los dos huecos para algo que no vas a pulsar.
+# Se pintan como icono suelto y no cuentan para el tope.
+NOTI_ACC_ICONO = {
+    "settings": "ajustes", "preferences": "ajustes", "config": "ajustes",
+    "configuracion": "ajustes", "configuraci\u00f3n": "ajustes",
+}
 NOTI_CAMPO   = 320    # ancho del campo de respuesta
 NOTI_BARRA   = 300    # ancho de la barra de progreso de un aviso
 G_SEND       = ""

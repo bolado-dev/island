@@ -1219,7 +1219,19 @@ class Island(Gtk.Window):
         # Lo que se puede hacer con ella. "default" no es un boton: es
         # lo que pasa al pulsar la tarjeta entera, que es como se
         # contesta a una notificacion en cualquier telefono.
-        acciones = list(d.get("acciones") or [])[:T.NOTI_BOTONES]
+        # Las acciones se parten en dos: las que son una decision
+        # ("Me gusta", "Silenciar") van con su texto, y las de siempre
+        # --la rueda de ajustes que Chrome mete en TODA notificacion
+        # web- van como icono suelto. Si no, el boton que nunca vas a
+        # pulsar se come uno de los dos huecos y empuja el mensaje.
+        grandes, chicas = [], []
+        for i, (clave, etiqueta) in enumerate(d.get("acciones") or []):
+            icono = T.NOTI_ACC_ICONO.get((clave or "").strip().lower())
+            if icono:
+                chicas.append((i, icono))
+            elif len(grandes) < T.NOTI_BOTONES:
+                grandes.append((i, etiqueta))
+        acciones = grandes + chicas
         respondiendo = (self.resp is not None
                         and self.resp.get("id") == d.get("id"))
 
@@ -1257,13 +1269,23 @@ class Island(Gtk.Window):
                                T.ACCENT if self.hover == "noti-resp"
                                else T.SURF_1,
                                tag="noti-resp", padx=18, pady=12))
-        for i, (_clave, etiqueta) in enumerate(acciones):
+        for i, etiqueta in grandes:
             tag = "noti:%d" % i
             if botones.items:
                 botones.add(R.Gap(10))
             botones.add(R.Chip(self._clip(etiqueta, 14), T.F_SMALL, T.FG,
                                T.ACCENT if self.hover == tag else T.SURF_1,
                                tag=tag, padx=18, pady=12))
+        for i, icono in chicas:
+            tag = "noti:%d" % i
+            if botones.items:
+                botones.add(R.Gap(8))
+            botones.add(R.Chip("", T.F_SMALL, T.FG,
+                               T.ACCENT if self.hover == tag else T.SURF_1,
+                               tag=tag, padx=13, pady=12,
+                               icon=self._ico(icono, 22,
+                                              T.FG if self.hover == tag
+                                              else T.DIM)))
         if botones.items:
             fila.add(R.Gap(T.GAP_GROUP), botones)
         return fila
