@@ -36,9 +36,14 @@ RUTA = "/org/freedesktop/Notifications"
 NOMBRE = "org.freedesktop.Notifications"
 
 # Lo que decimos saber hacer. Se declara SOLO lo que de verdad se hace:
-# anunciar "actions" sin pintar botones haria que las aplicaciones
-# ofrecieran respuestas que no llevan a ninguna parte.
-CAPACIDADES = ["body", "body-markup", "icon-static", "persistence"]
+# anunciar algo que no esta haria que las aplicaciones ofrecieran
+# caminos que no llevan a ninguna parte.
+#
+# "inline-reply" es la convencion de KDE: la aplicacion mete una accion
+# llamada asi y el servidor, en vez de un boton, pinta un campo de
+# texto; al enviar se emite NotificationReplied con lo escrito.
+CAPACIDADES = ["actions", "body", "body-markup", "body-hyperlinks",
+               "icon-static", "persistence", "inline-reply"]
 
 INTROSPECCION = """
 <node>
@@ -73,6 +78,10 @@ INTROSPECCION = """
     <signal name='ActionInvoked'>
       <arg type='u' name='id'/>
       <arg type='s' name='action_key'/>
+    </signal>
+    <signal name='NotificationReplied'>
+      <arg type='u' name='id'/>
+      <arg type='s' name='text'/>
     </signal>
   </interface>
 </node>
@@ -202,10 +211,43 @@ class Servidor(object):
             # enseña. Igual que hacia dunst.
             return nid
 
+        # Las acciones llegan en una lista plana: clave, etiqueta,
+        # clave, etiqueta... "default" no es un boton, es lo que pasa al
+        # pulsar la tarjeta entera; "inline-reply" tampoco, es un campo
+        # de texto.
+        acciones, por_defecto, responder = [], False, None
+        lista = list(_acciones or [])
+        for i in range(0, len(lista) - 1, 2):
+            clave, etiqueta = _str(lista[i]), _str(lista[i + 1])
+            if clave == "default":
+                por_defecto = True
+            elif clave == "inline-reply":
+                responder = etiqueta or "Responder"
+            elif clave:
+                acciones.append((clave, etiqueta or clave))
+
         ev = {"kind": "notify", "id": nid,
               "app": app or "", "title": titulo or "", "body": cuerpo or "",
               "urgency": URGENCIAS.get(_byte(pistas.get("urgency")), "normal"),
-              "hint": _pistas_texto(pistas, cuerpo)}
+              "hint": _pistas_texto(pistas, cuerpo),
+              "acciones": acciones, "defecto": por_defecto}
+        if responder is not None:
+            ev["responder"] = responder
+            ev["responder_pista"] = _str(
+                pistas.get("x-kde-reply-placeholder-text") or "")
+
+        # Progreso: la pista 'value' del spec, 0..100. La usan los
+        # gestores de ficheros al copiar y los descargadores. Es una
+        # barra, no un numero perdido en el cuerpo.
+        if "value" in pistas:
+            try:
+                ev["valor"] = max(0, min(100, int(pistas["value"])))
+            except Exception:
+                pass
+
+        # Una notificacion "residente" no se cierra al pulsar un boton:
+        # lo dice la aplicacion cuando el boton no termina la historia.
+        ev["residente"] = bool(pistas.get("resident"))
 
         # La imagen, por orden de preferencia del spec: los pixeles que
         # vienen dentro mandan sobre cualquier ruta, y la ruta propia de
@@ -286,6 +328,33 @@ class Servidor(object):
         try:
             self.conn.emit_signal(None, RUTA, NOMBRE, "NotificationClosed",
                                   GLib.Variant("(uu)", (nid, razon)))
+        except Exception:
+            pass
+
+    # ------------------------------------------------- lo que vuelve
+
+    def invoca(self, nid, clave):
+        """Un boton pulsado (o la tarjeta, si la accion es 'default')."""
+        if self.conn is None:
+            return
+        try:
+            self.conn.emit_signal(None, RUTA, NOMBRE, "ActionInvoked",
+                                  GLib.Variant("(us)", (int(nid), clave)))
+        except Exception:
+            pass
+
+    def responde(self, nid, texto):
+        """Lo escrito en el campo de respuesta.
+
+        Señal propia de la convencion de KDE. Va antes del cierre a
+        proposito: hay aplicaciones que al recibir el cierre dan la
+        notificacion por descartada y tiran lo que venga despues.
+        """
+        if self.conn is None:
+            return
+        try:
+            self.conn.emit_signal(None, RUTA, NOMBRE, "NotificationReplied",
+                                  GLib.Variant("(us)", (int(nid), texto)))
         except Exception:
             pass
 

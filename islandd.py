@@ -258,6 +258,7 @@ class Island(Gtk.Window):
         self.glow_fase = 0.0
         self._pulso_acum = 0.0
         self.pw = None            # estado del campo de contrasena
+        self.resp = None          # respuesta en linea a una notificacion
         self.known = set()        # perfiles de red ya guardados
         self.caret_on = True
         self._blink_id = None
@@ -646,6 +647,12 @@ class Island(Gtk.Window):
             # _poll_power, para que el renderizador sea uno solo.
             ev = {"kind": "power", "charging": bool(ev.get("charging")),
                   "pct": int(ev.get("value") or self.sys.battery)}
+        if kind == "notify" and self.resp is not None \
+                and ev.get("id") != self.resp.get("id"):
+            # Llega otro aviso mientras escribias: el hueco es uno solo,
+            # asi que la tarjeta de debajo cambia y lo escrito ya no
+            # sabria a donde ir.
+            self._resp_cierra(enviar=False)
         if kind == "notify":
             # Limpiar ANTES de aplicar reglas: si no, una etiqueta
             # partiria una palabra que una regla espera encontrar.
@@ -1209,10 +1216,57 @@ class Island(Gtk.Window):
         body = d.get("body") or ""
         if body.strip() == title.strip():
             body = ""
+        # Lo que se puede hacer con ella. "default" no es un boton: es
+        # lo que pasa al pulsar la tarjeta entera, que es como se
+        # contesta a una notificacion en cualquier telefono.
+        acciones = list(d.get("acciones") or [])[:T.NOTI_BOTONES]
+        respondiendo = (self.resp is not None
+                        and self.resp.get("id") == d.get("id"))
+
+        ancho = 46 if not (acciones or d.get("responder")) else 34
         rows = [R.Row().add(R.Text(self._clip(title, 32), T.F_TITLE, T.FG))]
         if body:
-            rows.append(R.Row().add(R.Text(self._clip(body, 46), T.F_SUB, T.DIM)))
-        return R.Row().add(head, R.Gap(20), R.Stack(rows))
+            rows.append(R.Row().add(R.Text(self._clip(body, ancho),
+                                           T.F_SUB, T.DIM)))
+        # Progreso: la pista 'value' del spec. Una barra dice de un
+        # vistazo lo que un "47%" perdido en el cuerpo obliga a leer.
+        if d.get("valor") is not None:
+            rows.append(R.Bar(T.NOTI_BARRA, 8, d["valor"] / 100.0, acc,
+                              T.SURF_2))
+
+        fila = R.Row().add(head, R.Gap(20),
+                           R.Row([R.Stack(rows, gap=6)],
+                                 tag="noti-def" if d.get("defecto") else None))
+
+        if respondiendo:
+            # El campo se come la fila: mientras escribes, los botones
+            # sobran y lo unico que importa es ver lo que llevas puesto.
+            fila.add(R.Gap(T.GAP_GROUP),
+                     R.Field(T.NOTI_CAMPO, self.resp["texto"], T.F_SUB, T.FG,
+                             caret=self.caret_on, secret=False),
+                     R.Gap(10),
+                     R.Chip("", T.F_SMALL, T.FG, T.ACCENT, tag="noti-env",
+                            icon=self._ico("send", 24, T.FG, T.G_SEND),
+                            padx=16, pady=12))
+            return fila
+
+        botones = R.Row()
+        if d.get("responder"):
+            botones.add(R.Chip(self._clip(d["responder"], 14), T.F_SMALL,
+                               T.FG,
+                               T.ACCENT if self.hover == "noti-resp"
+                               else T.SURF_1,
+                               tag="noti-resp", padx=18, pady=12))
+        for i, (_clave, etiqueta) in enumerate(acciones):
+            tag = "noti:%d" % i
+            if botones.items:
+                botones.add(R.Gap(10))
+            botones.add(R.Chip(self._clip(etiqueta, 14), T.F_SMALL, T.FG,
+                               T.ACCENT if self.hover == tag else T.SURF_1,
+                               tag=tag, padx=18, pady=12))
+        if botones.items:
+            fila.add(R.Gap(T.GAP_GROUP), botones)
+        return fila
 
     # ------------------------------------------------------------ paneles
 
@@ -2628,6 +2682,11 @@ class Island(Gtk.Window):
         return False
 
     def open_panel(self, which, tab=None):
+        if self.resp is not None:
+            # Abrir un panel con una respuesta a medias: lo escrito se
+            # cancela ANTES de que el panel pida el teclado, o el
+            # soltado de esta captura se llevaria por delante la suya.
+            self._resp_cierra(enviar=False)
         act = self.activities.get("panel")
         if act is not None and act.data.get("which") == which:
             if tab is not None and tab != act.data.get("tab"):
@@ -2789,6 +2848,80 @@ class Island(Gtk.Window):
         self._blink_on()
         self.refresh()
 
+    def _noti_accion(self, clave):
+        """Un boton de la notificacion, o la tarjeta entera.
+
+        Tras pulsar se cierra, que es lo que dice el spec y lo que
+        espera la aplicacion: si no, Chrome se queda creyendo que el
+        aviso sigue en pantalla. Salvo que la propia notificacion se
+        declare "residente", que es como una aplicacion dice "este boton
+        no termina la historia".
+        """
+        act = self.activities.get("notify")
+        d = act.data if act is not None else {}
+        nid = d.get("id")
+        if self.notis is not None and nid:
+            self.notis.invoca(nid, clave)
+            if not d.get("residente"):
+                self.notis.cierra(nid, 2)
+        if not d.get("residente"):
+            self.activities.pop("notify", None)
+        self.refresh()
+
+    def _resp_abre(self, d):
+        """Responder sin salir del notch.
+
+        Mientras escribes, la tarjeta deja de caducar: una notificacion
+        que se va sola a los cinco segundos con media frase escrita
+        seria la peor forma posible de perder un mensaje.
+        """
+        self.resp = {"id": d.get("id"), "texto": ""}
+        act = self.activities.get("notify")
+        if act is not None:
+            act.expires = None
+        self._grab(Gdk.SeatCapabilities.ALL)
+        self._blink_on()
+        self.refresh()
+
+    def _resp_cierra(self, enviar=False):
+        r, self.resp = self.resp, None
+        self._blink_off()
+        self._ungrab()
+        texto = (r or {}).get("texto", "").strip()
+        if enviar and texto and self.notis is not None and r.get("id"):
+            # La respuesta ANTES del cierre: hay aplicaciones que al
+            # recibir el cierre dan la notificacion por descartada y
+            # tiran lo que venga despues.
+            self.notis.responde(r["id"], texto)
+            self.notis.cierra(r["id"], 2)
+        if enviar:
+            self.activities.pop("notify", None)
+        else:
+            # Al cancelar, la tarjeta se queda pero vuelve a caducar:
+            # estaba congelada solo mientras escribias.
+            act = self.activities.get("notify")
+            if act is not None:
+                act.expires = time.monotonic() + 4.0
+        self.refresh()
+
+    def _key_resp(self, ev):
+        if self._seat is not None:
+            self._arm_guard()
+        kv = ev.keyval
+        if kv == Gdk.KEY_Escape:
+            self._resp_cierra(enviar=False)
+        elif kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self._resp_cierra(enviar=True)
+        elif kv == Gdk.KEY_BackSpace:
+            self.resp["texto"] = self.resp["texto"][:-1]
+            self.refresh()
+        else:
+            ch = Gdk.keyval_to_unicode(kv)
+            if ch >= 32:
+                self.resp["texto"] += chr(ch)
+                self.refresh()
+        return True
+
     def _blink_on(self):
         """Arranca el parpadeo del cursor, cancelando el anterior.
 
@@ -2819,7 +2952,7 @@ class Island(Gtk.Window):
         self.caret_on = not self.caret_on
         self._damage()
         vivo = any(x is not None for x in (self.pw, self.launch,
-                                           self.emo, self.port))
+                                           self.emo, self.port, self.resp))
         if not vivo:
             self._blink_id = None      # se quita solo: la casilla tambien
         return vivo
@@ -2827,6 +2960,8 @@ class Island(Gtk.Window):
     def on_key(self, widget, ev):
         if self._seat is not None:
             self._arm_guard()
+        if self.resp is not None:
+            return self._key_resp(ev)
         if self.launch is not None:
             return self._key_launcher(ev)
         if self.emo is not None:
@@ -3543,6 +3678,9 @@ class Island(Gtk.Window):
         if tag is None:
             # Con el puntero capturado esto incluye los clics de FUERA de
             # la isla, que es como se cierra un menu.
+            if self.resp is not None:
+                self._resp_cierra(enviar=False)
+                return True
             if "panel" in self.activities:
                 self._close_panel()
             else:
@@ -3598,6 +3736,23 @@ class Island(Gtk.Window):
             # El indicador del notch lleva a SU pestana, no al
             # calendario: vienes de mirar una cuenta, no la fecha.
             self.open_panel("calendar", tag[7:])
+        elif tag == "noti-def":
+            # Pulsar la tarjeta entera: es como se contesta a una
+            # notificacion en cualquier telefono, y lo que abre la
+            # conversacion de la que viene.
+            self._noti_accion("default")
+        elif tag.startswith("noti:"):
+            act = self.activities.get("notify")
+            accs = (act.data.get("acciones") if act is not None else []) or []
+            i = int(tag[5:])
+            if i < len(accs):
+                self._noti_accion(accs[i][0])
+        elif tag == "noti-resp":
+            act = self.activities.get("notify")
+            if act is not None:
+                self._resp_abre(act.data)
+        elif tag == "noti-env":
+            self._resp_cierra(enviar=True)
         elif tag in ("tc:rep", "tc:ok"):
             act = self.activities.pop("tiempo", None)
             if tag == "tc:rep" and act is not None:
@@ -3687,7 +3842,8 @@ class Island(Gtk.Window):
                 or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
                                    "ds:", "media:", "emo:", "cap:", "pp:",
                                    "cat:", "rel:", "cro:", "tmp:", "pom:",
-                                   "tiempo:", "tc:")) or tag == "pw-ver")
+                                   "tiempo:", "tc:", "noti:"))
+                or tag in ("pw-ver", "noti-def", "noti-resp", "noti-env"))
 
     def _set_cursor(self, pointer):
         if pointer == self._cursor_ptr:

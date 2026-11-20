@@ -99,6 +99,31 @@ Recibiendo la llamada no hay nada que perder: los píxeles vienen dentro y el
 fichero se lee en el acto. El marcado HTML del cuerpo se limpia antes de
 pintarlo, y la urgencia crítica pinta en rojo.
 
+**Y ahora se puede contestar.** Lo que antes no cabía:
+
+- **Botones.** Las acciones que manda la aplicación salen como chips a la
+  derecha de la tarjeta, dos como mucho — es un aviso que se va solo en cinco
+  segundos, no un diálogo. Al pulsar uno se emite `ActionInvoked` y la
+  notificación se cierra, que es lo que dice el spec y lo que espera quien la
+  mandó; salvo que se declare `resident`, que es como una aplicación dice
+  «este botón no termina la historia».
+- **Pulsar la tarjeta.** Si la notificación trae la acción `default` —Chrome
+  la manda siempre—, pulsar el cuerpo la invoca: es lo que abre la
+  conversación de la que viene, como en cualquier teléfono.
+- **Responder sin salir.** Si la aplicación pide `inline-reply` (la convención
+  de KDE), en vez de un botón sale un campo: escribes, Intro, y se emite
+  `NotificationReplied` con el texto. Mientras escribes la tarjeta **deja de
+  caducar** — una notificación que se va sola con media frase escrita sería la
+  peor forma de perder un mensaje—, y Esc la devuelve a su plazo normal.
+- **Progreso.** La pista `value` del spec, 0 a 100, se pinta como barra. La
+  usan los gestores de ficheros al copiar y los descargadores; un «47%»
+  perdido en el cuerpo hay que leerlo, una barra no.
+
+```
+  [foto]  Ana García                    [Me gusta] [Silenciar]
+          te ha mencionado en #general
+```
+
 A cambio, mientras la isla no esté no hay notificaciones — igual que antes,
 porque dunst ya estaba con `skip_display = true` y sin la isla tampoco se veía
 nada. `launch.sh` la levanta si se cae, y si algo activa a dunst por D-Bus

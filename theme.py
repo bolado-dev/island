@@ -294,7 +294,7 @@ ICON_GLYPH = {
     "emoji": "\uf118", "clip": "\uf0ea",   # el mismo de G_CLIP, que se define mas abajo
     "play": G_PLAY, "pause": G_PAUSE, "reset": G_RESET, "skip": G_SKIP,
     "quita": G_QUITA,
-    "mas": G_MAS, "menos": G_MENOS,
+    "mas": G_MAS, "menos": G_MENOS, "send": "\uf1d8",
 }
 
 
@@ -597,3 +597,11 @@ GLOW_PULSO_CRECE = 0.07   # y crece un pelo al encenderse, como el aire
 # rampa de opacidad, no un movimiento: a 30 se ve igual que a 120 y
 # cuesta la cuarta parte.
 GLOW_PULSO_FPS  = 30.0
+
+# Notificaciones con botones. Dos como mucho: son una tarjeta que se va
+# sola en cinco segundos, no un dialogo, y con tres la isla se pone mas
+# ancha que la pantalla util.
+NOTI_BOTONES = 2
+NOTI_CAMPO   = 320    # ancho del campo de respuesta
+NOTI_BARRA   = 300    # ancho de la barra de progreso de un aviso
+G_SEND       = ""
