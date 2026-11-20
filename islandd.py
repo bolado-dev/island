@@ -358,19 +358,11 @@ class Island(Gtk.Window):
             # --no hay nodo que enfocar-, asi que el foco se quedaba
             # colgado de la ventana anterior y el notch seguia
             # ofreciendo dictado para una ventana que ya no esta
-            # delante. Se nota mucho mas ahora que en reposo casi no
-            # hay nada mas: lo poco que sale tiene que ser verdad.
+            # delante.
             self.foco.refrescar()
             if self._ws_prev is not None:
                 self._mostrar()
                 self._programar_ocultado(T.REVEAL_MS)
-                # La pildora de escritorios no esta fija en reposo: sale
-                # al cambiar y se va con el notch. Un poco mas que el
-                # repliegue, para que no desaparezca ANTES que la propia
-                # isla y se vea el hueco encogiendose.
-                self._ws_hasta = time.monotonic() + T.REVEAL_MS / 1000.0 + 0.3
-                GLib.timeout_add(T.REVEAL_MS + 400,
-                                 lambda: (self.refresh(), False)[1])
             self._ws_prev = foco
         self.refresh()
 
@@ -758,11 +750,7 @@ class Island(Gtk.Window):
     def build(self, cr):
         act = self.current()
         if act is None:
-            # Dos estados distintos, no uno: abrir la fila entera es un
-            # cambio de contenido, y con la misma clave el cruce no se
-            # haria y los iconos apareceran de golpe.
-            return ("idle:todo" if self._dentro else "idle",
-                    "pill", self.build_idle(cr))
+            return "idle", "pill", self.build_idle(cr)
         key = act.kind
         if act.kind == "dictado":
             # Cada nivel de la onda llega como un evento; si la clave
@@ -802,158 +790,125 @@ class Island(Gtk.Window):
         return R.Text(glifo, font, color, tag=tag)
 
     def build_idle(self, cr):
-        """La isla en reposo: la hora, y poco mas.
-
-        El estado --fecha, escritorios, volumen, wifi, bateria,
-        encendido- aparece al acercar el raton y se va al apartarlo. Un
-        icono permanente para algo que el 95% del tiempo dice "normal"
-        ocupa sitio para no decir nada; y la regla ya la cumplian el
-        dictado y el "no molestar", asi que esto es aplicarla al resto.
-
-        Lo que SI sale sin pedirlo es lo que esta pasando AHORA: que
-        estes dictando, que haya un microfono abierto, que el sonido
-        este silenciado, que no haya wifi, que la bateria este en las
-        ultimas, que corra una cuenta. Son excepciones, no estado fijo.
-
-        El orden es el de siempre --hora, escritorios, estado- y la fila
-        mide lo que lleva dentro: nada de huecos de relleno para
-        cuadrarla, que se ven como un fallo.
-        """
         si = self.sys
-        amp = self._dentro          # el raton, encima
-        fila = R.Row()
+        row = R.Row()
+        # Reloj y fecha forman un grupo pulsable que abre el calendario.
+        row.add(R.Row([
+            R.Rodillo(self._rodillo("reloj", time.strftime("%H:%M")),
+                      T.F_CLOCK, T.FG),
+            # La fecha acompana al reloj: mismo grupo, por eso GAP_ITEM y
+            # no GAP_GROUP. Mas pequena y apagada para que el reloj siga
+            # siendo el ancla visual del notch.
+            R.Gap(T.GAP_ITEM),
+            R.Text(time.strftime("%a %d %b"), T.F_SMALL, T.DIM),
+        ], tag="clock"))
+        row.add(R.Gap(T.GAP_GROUP))
 
-        def grupo(*cosas):
-            """Añade un grupo separandolo del anterior."""
-            if fila.items:
-                fila.add(R.Gap(T.GAP_GROUP))
-            fila.add(*cosas)
-
-        # --- la hora, y con el raton encima tambien la fecha. Mismo
-        #     grupo: la fecha acompana al reloj, no es otra cosa.
-        reloj = [R.Rodillo(self._rodillo("reloj", time.strftime("%H:%M")),
-                           T.F_CLOCK, T.FG)]
-        if amp:
-            reloj += [R.Gap(T.GAP_ITEM),
-                      R.Text(time.strftime("%a %d %b"), T.F_SMALL, T.DIM)]
-        grupo(R.Row(reloj, tag="clock"))
-
-        # --- escritorios: al pasar el raton, y un rato despues de
-        # cambiar de uno. Fuera de eso no estan: en que escritorio estas
-        # lo dicen las ventanas que tienes delante, y la pildora solo
-        # importa en el instante en que cambias.
-        if amp or time.monotonic() < getattr(self, "_ws_hasta", 0.0):
-            estados = [st for _n, st in self.bspwm.desktops]
-            destino = self.bspwm.focused * R.WsBar.paso()
-            if self.sp_wsx.target != destino:
-                self._ws_salida = self.sp_wsx.target
-                if T.WS_ANIM:
-                    self.sp_wsx.set(destino)
-                else:
-                    self.sp_wsx.snap(destino)
-                if T.WS_POP:
-                    # Arranca del tamano de un punto y crece hasta el suyo.
-                    self.sp_pop.snap(T.SEG_BAR)
-                    self.sp_pop.set(T.SEG_SLOT)
-                self.ensure_tick()
-            grupo(R.Row([R.WsBar(estados, self.sp_wsx.value,
-                                 self.sp_pop.value,
-                                 getattr(self, "_ws_salida", None))],
-                        tag="ws"))
-
-        # --- cuentas en marcha. Pegadas al reloj porque son lo mismo
-        # que el reloj --tiempo- y el clic lleva a su pestana.
+        # Cronometro, temporizador o pomodoro en marcha. Pegado al reloj
+        # porque es lo mismo que el reloj --tiempo- y porque al pulsarlo
+        # se abre justo la pestana desde la que lo pusiste en marcha.
+        #
+        # En pausa tambien sale, apagado: olvidarse de una cuenta parada
+        # es justo lo que este indicador evita.
         for cual, texto, corre in self.tiempos.activos():
             col = self._color_tiempo(cual, corre)
-            grupo(R.Row([
+            row.add(R.Row([
                 self._ico(cual, 24, col),
                 R.Gap(8),
                 R.Rodillo(self._rodillo("t:" + cual, texto), T.F_TITLE, col),
             ], tag="tiempo:" + cual))
+            row.add(R.Gap(T.GAP_GROUP))
 
-        # --- dictado disponible: el logo de la IA y la palabra, para que
-        # la primera vez se entienda que el logo no es decoracion sino
-        # donde va a caer lo que digas.
+        # Indicador de escritorios: pista de huecos iguales con una
+        # pildora azul que se desliza al cambiar. El muelle solo mueve
+        # su posicion; la pista es fija, asi que la animacion es un
+        # unico elemento viajando y no dos cambiando de tamano.
+        estados = [st for _n, st in self.bspwm.desktops]
+        destino = self.bspwm.focused * R.WsBar.paso()
+        if self.sp_wsx.target != destino:
+            self._ws_salida = self.sp_wsx.target
+            if T.WS_ANIM:
+                self.sp_wsx.set(destino)
+            else:
+                self.sp_wsx.snap(destino)
+            if T.WS_POP:
+                # Arranca del tamano de un punto y crece hasta el suyo.
+                self.sp_pop.snap(T.SEG_BAR)
+                self.sp_pop.set(T.SEG_SLOT)
+            self.ensure_tick()
+        ws = R.Row([R.WsBar(estados, self.sp_wsx.value, self.sp_pop.value,
+                            getattr(self, "_ws_salida", None))], tag="ws")
+        row.add(ws)
+
+        row.add(R.Gap(T.GAP_GROUP))
+        # Dictado disponible. Mismo criterio que el "no molestar" de
+        # abajo: aparece solo cuando significa algo. Un icono permanente
+        # para un estado que casi siempre esta apagado es ruido fijo.
         quiere = 1.0 if self.foco.ia else 0.0
         if self.sp_mic.target != quiere:
             self.sp_mic.set(quiere)
             self.ensure_tick()
         if self.sp_mic.value > 0.01 or self.foco.ia:
+            # El logo de la IA, en blanco como el resto de iconos de
+            # estado, y "Dictado" al lado para que la primera vez se
+            # entienda que el logo no es decoracion sino que indica
+            # donde va a caer lo que digas.
             logo = self.foco.ia or "claude"
-            grupo(R.Row([R.Alfa(R.Row([
+            row.add(R.Row([R.Alfa(R.Row([
                 R.Icon("ia-" + logo, 22, T.FG, T.G_MIC, T.F_SMALL),
                 R.Gap(8),
                 R.Text("Dictado", T.F_SMALL, T.DIM),
             ]), self.sp_mic)], tag="dictado"))
+            row.add(R.Gap(T.GAP_GROUP))
             self._mic_en_fila = True
-
-        # --- micro abierto por OTRO programa. Se queda mientras dure: lo
-        # que importa de esto no es el aviso, es poder mirar el notch y
-        # saber si te estan escuchando.
+        # Micro abierto por OTRO programa. Se queda mientras dure, no
+        # unos segundos: lo que importa de esto no es el aviso, es poder
+        # mirar el notch y saber si te estan escuchando.
         quiere_rec = 1.0 if self.micro.abierto else 0.0
         if self.sp_rec.target != quiere_rec:
             self.sp_rec.set(quiere_rec)
             self.ensure_tick()
         if self.sp_rec.value > 0.01 or self.micro.abierto:
-            grupo(R.Row([R.Alfa(R.Row([
+            row.add(R.Row([R.Alfa(R.Row([
                 R.Dot(7, T.RED),
                 R.Gap(7),
                 self._ico("mic", 22, T.RED, T.G_MIC),
             ]), self.sp_rec)], tag="micro"))
+            row.add(R.Gap(T.GAP_GROUP))
             self._rec_en_fila = True
 
+        # Solo aparece cuando esta activo: un icono permanente para un
+        # estado que casi siempre esta apagado seria ruido fijo.
         if self.dnd:
-            grupo(R.Row([self._ico("bell-off", 28, T.ORANGE)], tag="dnd"))
-
-        # --- estado. Los tres van juntos y separados entre si por
-        # GAP_ITEM, no por GAP_GROUP: son una sola cosa, "como esta la
-        # maquina", y de ahi que compartan grupo.
-        estado = R.Row()
-
-        def item(*cosas):
-            if estado.items:
-                estado.add(R.Gap(T.GAP_ITEM))
-            estado.add(*cosas)
-
-        # Volumen: solo silenciado. Subir y bajar ya saca su pildora, y
-        # un altavoz encendido no es una noticia.
-        if amp or si.muted:
-            nom = ("vol-mute" if si.muted else
-                   ["vol-mute", "vol-low", "vol-mid",
-                    "vol-high"][1 + min(2, si.volume // 40)])
-            item(R.Row([self._ico(nom, 28, T.DIM2 if si.muted else T.FG,
-                                  T.G_MUTE)], tag="vol"))
-
-        # Wifi: solo cuando NO hay. Un icono de wifi conectado no dice
-        # nada que no sepas ya por estar usando la red.
-        if amp or not si.wifi:
-            item(R.Row([self._ico("wifi" if si.wifi else "wifi-off", 28,
-                                  T.FG if si.wifi else T.DIM2,
-                                  T.G_WIFI)], tag="net"))
-
-        # Bateria: al pasar el raton, o cuando queda poca. El enchufe ya
-        # saca su tarjeta al conectarlo, asi que "cargando" no necesita
-        # un sitio fijo; "me quedo sin bateria" si.
-        if amp or si.battery <= T.BAT_AVISO:
-            if si.charging:
-                bat = [self._ico("bolt", 28, T.GREEN, T.G_BOLT), R.Gap(6),
-                       R.Rodillo(self._rodillo("bat", "%d%%" % si.battery),
-                                 T.F_TITLE, T.GREEN)]
-            else:
-                lvl = min(4, max(0, si.battery * 5 // 100))
-                col = T.RED if si.battery <= 15 else T.FG
-                bat = [self._ico("bat-%d" % lvl, 28, col, T.G_BAT[lvl]),
-                       R.Gap(6),
-                       R.Rodillo(self._rodillo("bat", "%d%%" % si.battery),
-                                 T.F_TITLE, col)]
-            item(R.Row(bat, tag="bat"))
-
-        if estado.items:
-            grupo(estado)
-        if amp:
-            grupo(self._ico("power", 28, T.DIM, T.G_POWER, tag="power"))
-        return fila
-
+            row.add(R.Row([self._ico("bell-off", 28, T.ORANGE)], tag="dnd"))
+            row.add(R.Gap(T.GAP_ITEM))
+        # Cada icono de estado va envuelto en una fila con etiqueta: es
+        # lo que convierte el dibujo en una zona pulsable, porque las
+        # etiquetas se registran al dibujar con su posicion real.
+        row.add(R.Row([
+            self._ico("vol-mute" if si.muted
+                      else ["vol-mute", "vol-low", "vol-mid", "vol-high"][1 + min(2, si.volume // 40)],
+                      28, T.DIM2 if si.muted else T.FG,
+                      T.G_MUTE)], tag="vol"))
+        row.add(R.Gap(T.GAP_ITEM))
+        row.add(R.Row([
+            self._ico("wifi" if si.wifi else "wifi-off", 28,
+                      T.FG if si.wifi else T.DIM2, T.G_WIFI)], tag="net"))
+        row.add(R.Gap(T.GAP_ITEM))
+        if si.charging:
+            bat = [self._ico("bolt", 28, T.GREEN, T.G_BOLT), R.Gap(6),
+                   R.Rodillo(self._rodillo("bat", "%d%%" % si.battery),
+                             T.F_TITLE, T.GREEN)]
+        else:
+            lvl = min(4, max(0, si.battery * 5 // 100))
+            col = T.RED if si.battery <= 15 else T.FG
+            bat = [self._ico("bat-%d" % lvl, 28, col, T.G_BAT[lvl]), R.Gap(6),
+                   R.Rodillo(self._rodillo("bat", "%d%%" % si.battery),
+                             T.F_TITLE, col)]
+        row.add(R.Row(bat, tag="bat"))
+        row.add(R.Gap(T.GAP_GROUP))
+        row.add(self._ico("power", 28, T.DIM, T.G_POWER, tag="power"))
+        return row
 
     def build_activity(self, cr, act):
         d = act.data
@@ -3755,11 +3710,6 @@ class Island(Gtk.Window):
         self.ensure_tick()
 
     def on_motion(self, widget, ev):
-        if not self._dentro:
-            # Al soltar la captura de un panel, el evento de entrada
-            # puede no llegar: moverse por encima lo corrige.
-            self._dentro = True
-            self.refresh()
         tag, rect = self._hit(ev.x, ev.y)
 
         if self._drag == "vol-slider" and (ev.state & Gdk.ModifierType.BUTTON1_MASK):
@@ -3784,10 +3734,6 @@ class Island(Gtk.Window):
     def on_enter(self, widget, ev):
         self._dentro = True
         self._mostrar()
-        # La fila de reposo depende de esto: con el raton encima se
-        # abre entera y sin el se queda en la hora, asi que hay que
-        # reconstruirla, no solo repintar.
-        self.refresh()
         return False
 
     def on_leave(self, widget, ev):
@@ -3796,7 +3742,6 @@ class Island(Gtk.Window):
         self._set_hover(None, None)
         self._set_cursor(False)
         self._programar_ocultado()
-        self.refresh()
         return False
 
     def on_release(self, widget, ev):
