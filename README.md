@@ -733,7 +733,12 @@ Esos filetes son la diferencia entre parecer tallado en el panel y parecer una
 pieza pegada encima.
 
 **Eventos.** Un FIFO en `$XDG_RUNTIME_DIR`, una línea JSON por evento, y un
-cliente (`island-send`) para escribir en él. Todo lo que no sea estado del
+cliente (`island-send`) para escribir en él. El demonio lo reabre tras cada
+EOF —un FIFO lo devuelve en cuanto el último escritor cierra— y además vigila
+que el fichero que tiene abierto **siga siendo el de la ruta**: si alguien lo
+sustituye, se queda leyendo un inodo huérfano donde ya no escribe nadie, y
+como tampoco llega nunca el EOF que dispara la reapertura, se vuelve sorda
+para siempre sin un solo error en el log. Todo lo que no sea estado del
 sistema entra por ahí: los scripts de volumen y brillo, las capturas, y
 cualquier cosa que quieras añadir tú. (Las notificaciones ya no: esas llegan
 por D-Bus, directas.)

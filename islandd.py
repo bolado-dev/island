@@ -2175,8 +2175,13 @@ class Island(Gtk.Window):
         self.refresh()
 
     def _spawn(self, cmd):
+        # Con la salida al limbo: lo que se lanza desde aqui hereda la
+        # nuestra, y el log de la isla acababa lleno de los errores de
+        # Chrome --cientos de lineas- hasta dejar de servir para
+        # diagnosticar nada, que es justo para lo que esta.
         try:
-            GLib.spawn_async(["/bin/sh", "-c", cmd],
+            GLib.spawn_async(["/bin/sh", "-c",
+                              "%s >/dev/null 2>&1" % cmd],
                              flags=GLib.SpawnFlags.SEARCH_PATH)
         except Exception:
             self.on_event({"kind": "notify", "app": "Lanzador",

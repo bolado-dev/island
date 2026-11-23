@@ -16,6 +16,7 @@ import glob
 import hashlib
 import shutil
 import socket
+import stat
 import fcntl
 import struct
 import threading
@@ -838,23 +839,75 @@ class Fifo(object):
     Se reabre despues de cada EOF. Un FIFO devuelve EOF en cuanto el
     ultimo escritor cierra, asi que sin reabrir el demonio solo
     atenderia al primer cliente y despues quedaria sordo.
+
+    Y se vigila que el fichero abierto SIGA SIENDO el de la ruta. Esto
+    paso de verdad: arrancando una segunda isla, la nueva borraba el
+    FIFO y creaba otro, y la primera se quedaba leyendo un inodo
+    huerfano --abierto y borrado-. Como en ese ya no escribia nadie,
+    tampoco llegaba nunca el EOF que dispara la reapertura, asi que se
+    quedaba sorda para siempre: super+d dejaba de hacer nada y no habia
+    ni un error en el log.
     """
     def __init__(self, path, on_event):
         self.path = path
         self.on_event = on_event
-        if os.path.exists(path):
-            os.unlink(path)
-        os.mkfifo(path, 0o600)
+        self.ch = None
+        self._watch = None
+        self._ino = None
+        self._crea()
         self._open()
+        GLib.timeout_add_seconds(5, self._vigila)
+
+    def _crea(self):
+        """El FIFO, sin borrarlo si ya existe.
+
+        Antes se borraba y se creaba otro en cada arranque. Reusarlo
+        evita dejar huerfano al que estuviera leyendo otro proceso, que
+        es justo el caso de arriba.
+        """
+        try:
+            if stat.S_ISFIFO(os.stat(self.path).st_mode):
+                return
+            os.unlink(self.path)
+        except OSError:
+            pass
+        try:
+            os.mkfifo(self.path, 0o600)
+        except OSError:
+            pass
 
     def _open(self):
+        self._cierra()
+        self._crea()
         fd = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK)
+        self._ino = os.fstat(fd).st_ino
         self.ch = GLib.IOChannel.unix_new(fd)
         self.ch.set_encoding(None)
         self.ch.set_buffered(False)
         self._buf = b""
-        GLib.io_add_watch(self.ch, GLib.PRIORITY_DEFAULT,
-                          GLib.IO_IN | GLib.IO_HUP, self._on_io)
+        self._watch = GLib.io_add_watch(self.ch, GLib.PRIORITY_DEFAULT,
+                                        GLib.IO_IN | GLib.IO_HUP, self._on_io)
+
+    def _cierra(self):
+        if self._watch is not None:
+            GLib.source_remove(self._watch)
+            self._watch = None
+        if self.ch is not None:
+            try:
+                self.ch.shutdown(False)
+            except Exception:
+                pass
+            self.ch = None
+
+    def _vigila(self):
+        """Comprueba que la ruta sigue apuntando a lo que tenemos abierto."""
+        try:
+            ino = os.stat(self.path).st_ino
+        except OSError:
+            ino = None
+        if ino != self._ino:
+            self._open()
+        return True
 
     def _on_io(self, ch, cond):
         if cond & GLib.IO_IN:
@@ -875,10 +928,7 @@ class Fifo(object):
                         pass
         if cond & GLib.IO_HUP:
             # Ultimo escritor cerrado: reabrir para seguir escuchando.
-            try:
-                ch.shutdown(False)
-            except Exception:
-                pass
+            self._watch = None          # esta fuente se muere al devolver False
             GLib.idle_add(self._open)
             return False
         return True
