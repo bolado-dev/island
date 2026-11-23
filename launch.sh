@@ -14,8 +14,32 @@ LOG="${XDG_RUNTIME_DIR:-/tmp}/island.log"
 # pantalla entera. Ponerlo aqui tambien dejaria dos fuentes de
 # verdad que se contradicen.
 
-# Mata cualquier instancia previa sin tocar este propio script.
-for pid in $(pgrep -f "python3 .*islandd\.py"); do
+# Una sola isla por sesion, y el candado es lo que lo garantiza.
+#
+# Antes solo se mataba "cualquier instancia previa" del PROCESO, no del
+# supervisor, y eso tiene un agujero: arrancando launch.sh dos veces, el
+# segundo mata al hijo del primero, el primero lo resucita a los dos
+# segundos y te quedas con DOS islas para siempre, una dibujando encima
+# de la otra. Pasa de verdad --aparecieron dos, con 213 y 317 s de CPU
+# cada una- y encima solo una de ellas se queda con el nombre de
+# notificaciones de D-Bus: la otra se lo pierde y sigue pintando.
+#
+# El descriptor 9 queda abierto mientras viva este script, asi que el
+# candado lo sostiene el supervisor. El hijo no lo hereda (9>&- mas
+# abajo) o al morir el supervisor seguiria cerrado desde el hijo.
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/island.lock"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    echo "isla: ya hay otra corriendo (candado $LOCK), no arranco otra" >&2
+    exit 0
+fi
+
+# Y aun asi se mata lo que haya quedado suelto: un islandd sin
+# supervisor (porque lo mataron a el y no al hijo) no lo ve el candado.
+# El patron va ANCLADO a proposito. Sin ^...$ casa con cualquier linea
+# de ordenes que mencione islandd.py --un grep, un editor, el shell de
+# quien este trasteando- y se la lleva por delante. Visto y sufrido.
+for pid in $(pgrep -f "^python3 $DIR/islandd\.py$"); do
     [ "$pid" != "$$" ] && kill "$pid" 2>/dev/null
 done
 sleep 0.3
@@ -23,7 +47,7 @@ sleep 0.3
 fails=0
 while [ "$fails" -lt 10 ]; do
     start=$(date +%s)
-    python3 "$DIR/islandd.py" >>"$LOG" 2>&1
+    python3 "$DIR/islandd.py" 9>&- >>"$LOG" 2>&1
     end=$(date +%s)
     # Si aguanto mas de 30 s, no es un fallo de arranque: se reinicia
     # con el contador a cero.

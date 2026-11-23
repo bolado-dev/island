@@ -895,6 +895,14 @@ En tu `bspwmrc`:
 ~/.config/island/launch.sh &
 ```
 
+`launch.sh` la mantiene viva si se cae y **solo deja una**: sostiene un candado
+(`flock` sobre `$XDG_RUNTIME_DIR/island.lock`) mientras vive, así que un
+segundo arranque se va sin hacer nada. Antes solo mataba el proceso anterior y
+no al supervisor, y eso tenía un agujero: arrancándolo dos veces, el segundo
+mataba al hijo del primero, el primero lo resucitaba a los dos segundos y te
+quedabas con **dos islas** dibujando una encima de otra — y solo una de ellas
+con el nombre de notificaciones, porque la otra lo perdía y seguía pintando.
+
 Las notificaciones no necesitan nada más: la isla toma el nombre de D-Bus al
 arrancar y aparta a quien lo tuviera. Si usabas dunst, **quítalo del
 autoarranque** (`dunst &` en tu `bspwmrc`) o volverá a pelearse por el nombre
