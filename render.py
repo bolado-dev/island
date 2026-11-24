@@ -698,6 +698,10 @@ class Aros(object):
         return self.d, self.d
 
     def draw(self, cr, x, cy, a):
+        # Si viene un punto actual de lo anterior --un texto dibujado
+        # con Pango lo deja puesto--, el primer arco se traeria una
+        # linea desde el hasta el borde del anillo.
+        cr.new_path()
         cx = x + self.d / 2.0
         r = (self.d - self.grosor) / 2.0
         cr.set_line_width(self.grosor)

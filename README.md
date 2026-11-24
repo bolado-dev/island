@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.png" alt="El notch en reposo sobre el escritorio: reloj, fecha, indicador de escritorios y estado del sistema, en una pastilla negra colgando del borde superior" width="900">
+  <img src="docs/hero.png" alt="El notch en reposo sobre el escritorio: reloj, fecha, indicador de escritorios, el anillo de carga y el resto del estado, en una pastilla negra colgando del borde superior" width="900">
 </p>
 
 ---
@@ -326,17 +326,29 @@ island-send tiempo --target pomo --state skip
   <img src="docs/launcher.gif" alt="El lanzador con una búsqueda escrita; al volver a pulsar super y d se cierra y el notch se repliega" width="760">
 </p>
 
-**Carga de la máquina.** En reposo, dos columnas al lado del resto del estado:
-procesador y memoria, en el mismo orden que dentro del panel. No dicen «47%»,
-dicen si la cosa viene subiendo. La del procesador va **encendida** y la de
-memoria **apagada**, y esa jerarquía no es decoración: sin ella no se sabe
-cuál es cuál, y la que se mira de reojo es la primera.
+**Carga de la máquina.** En reposo, un **anillo doble** al lado del resto del
+estado: fuera el procesador, dentro la memoria, el mismo orden que dentro del
+panel. No dice «47%», dice cuánto hay y si la cosa viene subiendo; el número
+está a un clic. El arco de fuera es el más largo y el primero que se ve, y de
+los dos el que se mira de reojo es la carga.
 
-El color lo pone lo que significa. La del procesador se tiñe con la
-temperatura —naranja a partir de `TEMP_TIBIO` (85°), rojo a partir de
-`TEMP_ARDE` (95°)— y la de memoria se enciende en rojo solo al pasar de
-`MEM_AVISO` (92%), que es cuando la máquina va a empezar a tirar de
-intercambio y de ahí salen los tirones. Un clic las abre.
+Antes eran dos columnas de seis píxeles, y eran dos rayas: se veía que había
+algo, no cuánto marcaba. El anillo da mucha más superficie de color en el
+mismo sitio —el trazo recorre todo el perímetro en vez de subir por una línea
+recta— y llenarse en sentido horario se lee sin leer ningún número.
+
+El color lo pone lo que significa. El de fuera se tiñe con la temperatura
+—naranja a partir de `TEMP_TIBIO` (85°), rojo a partir de `TEMP_ARDE` (95°)—
+y el de dentro va en **azul**, el mismo de su barra dentro del panel: a 28
+píxeles dos arcos que solo se distinguen por el brillo se leen como un borrón,
+y el tono los separa de un vistazo sin quitarle jerarquía al blanco. Se
+enciende en rojo solo al pasar de `MEM_AVISO` (92%), que es cuando la máquina
+va a empezar a tirar de intercambio y de ahí salen los tirones. Un clic lo
+abre.
+
+<p align="center">
+  <img src="docs/carga-anillo.png" alt="Cinco anillos dobles con el arco de fuera al 5, 25, 50, 78 y 100 por ciento y el de dentro al 31, 44, 58, 70 y 95; el último, por encima del aviso, en rojo" width="620">
+</p>
 
 <p align="center">
   <img src="docs/panel-sistema.png" alt="Panel de sistema: CPU al 100% con su historial, una barra por núcleo, frecuencia y temperatura, memoria usada con barra, y abajo disco, wifi, vatios y carga media" width="640">
