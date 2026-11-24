@@ -297,6 +297,7 @@ ICON_GLYPH = {
     "mas": G_MAS, "menos": G_MENOS, "send": "\uf1d8",
     "ajustes": "\uf013", "cpu": "\uf2db", "memoria": "\uf1c0",
     "disco": "\uf0a0", "vatios": "\uf0e7", "grafica": "\uf080",
+    "red": "\uf0ac", "swap": "\uf0ec", "reloj-arriba": "\uf017",
 }
 
 
@@ -667,3 +668,11 @@ PANELES_HOVER = ("launcher", "emoji", "portapapeles", "battery")
 # menos de medio segundo, que es justo lo que tarda en llegar el
 # siguiente con el panel abierto.
 CARGA_SUAVE = 8.0
+
+# Suelo de la escala de las graficas de red y disco. Sin el, el ruido
+# de fondo --unos kilobytes de nada- llenaria la grafica entera y
+# parecaria que esta pasando algo.
+SIS_RED_MIN   = 64 * 1024        # 64 kB/s
+SIS_DISCO_MIN = 512 * 1024       # 512 kB/s
+SIS_CHISPA_W2 = 120              # las graficas pequeñas de red y disco
+SIS_CHISPA_H2 = 22

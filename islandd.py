@@ -1683,13 +1683,68 @@ class Island(Gtk.Window):
         elif not self.oculto:
             self._damage()
 
+    @staticmethod
+    def _tasa(bps):
+        """Bytes por segundo en la unidad que toque, sin decimales de mas."""
+        if bps >= 1e9:
+            return ("%.1f GB/s" % (bps / 1e9)).replace(".", ",")
+        if bps >= 1e6:
+            return ("%.1f MB/s" % (bps / 1e6)).replace(".", ",")
+        if bps >= 1e3:
+            return "%d kB/s" % (bps / 1e3)
+        return "%d B/s" % bps
+
+    @staticmethod
+    def _desde(seg):
+        d, r = int(seg // 86400), int(seg % 86400)
+        if d:
+            return "%dd %dh" % (d, r // 3600)
+        if r >= 3600:
+            return "%dh %dm" % (r // 3600, (r % 3600) // 60)
+        return "%dm" % (r // 60)
+
+    @staticmethod
+    def _normaliza(hist, suelo):
+        """La grafica a su propia escala.
+
+        Red y disco no tienen tope: pueden ser cuatro kilobytes o
+        cuatrocientos megas. Cada grafica se mide contra su propio
+        maximo reciente, con un suelo para que el ruido de fondo no
+        llene la grafica entera y parezca que esta pasando algo.
+        """
+        vals = list(hist)
+        if not vals:
+            return []
+        tope = max(max(vals), suelo)
+        return [v / tope for v in vals]
+
+    def _bloque(self, cr, W, icono, titulo, derecha, extra=None):
+        """Una cabecera de bloque: icono y nombre a la izquierda, el
+        dato a la derecha, y el hueco calculado para que los bloques
+        queden alineados entre si."""
+        izq = R.Row([self._ico(icono, 24, T.DIM), R.Gap(T.GAP_ITEM),
+                     R.Text(titulo, T.F_SUB, T.DIM)])
+        der = R.Row(derecha if isinstance(derecha, list) else [derecha])
+        hueco = max(T.GAP_GROUP, W - izq.size(cr)[0] - der.size(cr)[0]
+                    - (extra.size(cr)[0] + T.GAP_ITEM if extra else 0))
+        fila = R.Row([izq, R.Gap(hueco), der])
+        if extra is not None:
+            fila.add(R.Gap(T.GAP_ITEM), extra)
+        return fila
+
     def build_sistema(self, cr):
         """Carga de la maquina, con detalle.
 
-        Lo de arriba es el resumen que se mira un segundo --cuanto, a
-        cuantos grados y como viene-; lo de abajo, lo que se mira
+        Arriba el resumen que se mira un segundo --cuanto, a cuantos
+        grados y como viene-; debajo, por bloques, lo que se mira
         cuando algo va mal: que nucleo esta clavado, cuanta memoria
-        queda, que mas se esta calentando.
+        queda, si la red o el disco estan moviendo algo, y cuanto lleva
+        encendida.
+
+        Lo que NO esta, y es a proposito: que proceso se lo esta
+        comiendo. Para saberlo hay que leer los 483 ficheros de
+        /proc/<pid>/stat, que son 27 ms -- mas que todo lo demas de la
+        isla junto. Para eso esta htop.
         """
         c = self.carga
         W = T.SIS_ANCHO
@@ -1732,39 +1787,68 @@ class Island(Gtk.Window):
                     W - nucleos.size(cr)[0] - detalle.size(cr)[0])
         filas.append(R.Row([nucleos, R.Gap(hueco), detalle]))
 
-        # --- memoria
+        # --- memoria, y el intercambio solo si se esta usando
         filas.append(R.Rule(W, T.SURF_2))
-        cab = R.Row([
-            self._ico("memoria", 24, T.DIM),
-            R.Gap(T.GAP_ITEM),
-            R.Text("Memoria", T.F_SUB, T.DIM),
-        ])
-        cifra = R.Text("%s / %s GB" % (self._gb(c.mem_usada),
-                                       self._gb(c.mem_total)),
-                       T.F_SUB, T.FG)
-        hueco = max(T.GAP_GROUP, W - cab.size(cr)[0] - cifra.size(cr)[0])
-        filas.append(R.Row([cab, R.Gap(hueco), cifra]))
+        filas.append(self._bloque(
+            cr, W, "memoria", "Memoria",
+            R.Text("%s / %s GB" % (self._gb(c.mem_usada),
+                                   self._gb(c.mem_total)), T.F_SUB, T.FG)))
         filas.append(R.Bar(W, T.SIS_BARRA, c.mem_frac, T.ACCENT, T.SURF_2))
+        if c.swap[0] > 64 * 1024 * 1024:
+            # Que el sistema tire de intercambio importa: significa que
+            # la memoria de verdad no da, y de ahi salen los tirones.
+            filas.append(self._bloque(
+                cr, W, "swap", "Intercambio",
+                R.Text("%s / %s GB" % (self._gb(c.swap[0]),
+                                       self._gb(c.swap[1])),
+                       T.F_SMALL, T.DIM)))
 
-        # --- el resto de sondas, en una linea
+        # --- red y disco: tasa, grafica propia y lo que ocupa
+        filas.append(R.Rule(W, T.SURF_2))
+        filas.append(self._bloque(
+            cr, W, "red", "Red",
+            R.Text("\u2193 %s   \u2191 %s" % (self._tasa(c.red[0]),
+                                             self._tasa(c.red[1])),
+                   T.F_SMALL, T.FG),
+            R.Chispa(self._normaliza(c.red_hist, T.SIS_RED_MIN),
+                     T.SIS_CHISPA_W2, T.SIS_CHISPA_H2, T.ACCENT)))
+        filas.append(self._bloque(
+            cr, W, "disco", "Disco",
+            R.Text("\u2193 %s   \u2191 %s" % (self._tasa(c.disco[0]),
+                                             self._tasa(c.disco[1])),
+                   T.F_SMALL, T.FG),
+            R.Chispa(self._normaliza(c.disco_hist, T.SIS_DISCO_MIN),
+                     T.SIS_CHISPA_W2, T.SIS_CHISPA_H2, T.ACCENT)))
+        if c.disco_uso[1]:
+            usado, total = c.disco_uso
+            filas.append(R.Row([
+                R.Bar(W - 150, T.SIS_BARRA, usado / float(total),
+                      T.ACCENT, T.SURF_2),
+                R.Gap(T.GAP_ITEM),
+                R.Text("%s / %s GB" % (self._gb(usado), self._gb(total)),
+                       T.F_SMALL, T.DIM),
+            ]))
+
+        # --- el pie: lo que no necesita barra
         pie = R.Row()
+
         def dato(icono, texto, color=T.DIM):
             if pie.items:
                 pie.add(R.Gap(T.GAP_GROUP))
             pie.add(self._ico(icono, 22, T.DIM2), R.Gap(8),
                     R.Text(texto, T.F_SMALL, color))
-        for titulo, icono in (("Disco", "disco"), ("Wifi", "wifi"),
+
+        for titulo, icono in (("Disco", "disco"), ("Wifi", "red"),
                               ("GPU", "cpu")):
             t = c.temps.get(titulo)
             if t is not None:
                 dato(icono, "%d\u00b0" % round(t), self._color_temp(t, T.DIM))
         if c.vatios:
             dato("vatios", ("%.1f W" % c.vatios).replace(".", ","))
-        # La carga media lleva su nombre delante: un "24,3" suelto al
-        # lado de un "100%" no se sabe de que es, y lo que dice es otra
-        # cosa --cuanta cola hay esperando turno, no cuanto se usa-.
         dato("grafica", ("media %.1f" % c.carga1).replace(".", ","),
              T.RED if c.carga1 > len(c.nucleos) * 1.5 else T.DIM)
+        if c.arriba:
+            dato("reloj-arriba", self._desde(c.arriba))
         if pie.items:
             filas.append(R.Rule(W, T.SURF_2))
             filas.append(pie)

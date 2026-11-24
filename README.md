@@ -336,13 +336,25 @@ noticia — naranja a partir de `TEMP_TIBIO` (85°), rojo a partir de `TEMP_ARDE
   <img src="docs/panel-sistema.png" alt="Panel de sistema: CPU al 100% con su historial, una barra por núcleo, frecuencia y temperatura, memoria usada con barra, y abajo disco, wifi, vatios y carga media" width="640">
 </p>
 
-Dentro está lo que se mira cuando algo va mal: el historial de los últimos
-minutos, **una barra por núcleo** —con doce, lo que importa no es el número de
-cada uno sino si la carga está repartida o hay uno clavado—, la frecuencia
-media, la memoria, y abajo las demás sondas: disco, wifi, vatios que está
-chupando y la carga media (con su nombre delante, porque un «24,3» al lado de
-un «100%» no se sabe de qué es y además dice otra cosa: cuánta cola hay
-esperando turno, no cuánto se usa).
+Dentro está lo que se mira cuando algo va mal, por bloques: el historial de
+los últimos minutos, **una barra por núcleo** —con doce, lo que importa no es
+el número de cada uno sino si la carga está repartida o hay uno clavado—, la
+frecuencia media y la temperatura; la memoria, y el **intercambio** solo si se
+está usando, porque que el sistema tire de él significa que la memoria de
+verdad no da y de ahí salen los tirones; la **red** y el **disco** con su tasa
+de subida y bajada y su propia gráfica; cuánto ocupa el disco; y abajo las
+demás sondas: temperaturas, vatios, carga media —con su nombre delante, porque
+un «24,3» al lado de un «100%» no se sabe de qué es y además dice otra cosa:
+cuánta cola hay esperando turno, no cuánto se usa— y cuánto lleva encendida.
+
+Las gráficas de red y disco van **a su propia escala**: no tienen tope —pueden
+ser cuatro kilobytes o cuatrocientos megas—, así que cada una se mide contra
+su propio máximo reciente, con un suelo para que el ruido de fondo no llene la
+gráfica y parezca que está pasando algo.
+
+Lo que **no** está, y es a propósito: qué proceso se lo está comiendo. Para
+saberlo hay que leer los 483 ficheros de `/proc/<pid>/stat`, que son 27 ms —
+más que todo lo demás de la isla junto. Para eso está `htop`.
 
 **No llama a `sensors`.** lm-sensors lee `/sys/class/hwmon`, así que invocarlo
 sería un `fork+exec` cada dos segundos para que otro programa haga el mismo

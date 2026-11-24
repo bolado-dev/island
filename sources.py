@@ -164,6 +164,18 @@ class Carga(object):
         self.vatios = None
         self.ghz = 0.0
         self.carga1 = 0.0          # load average de un minuto
+        self.swap = (0, 0)         # usado, total
+        self.red = (0.0, 0.0)      # bytes/s bajando, subiendo
+        self.disco = (0.0, 0.0)    # bytes/s leyendo, escribiendo
+        self.disco_uso = (0, 0)    # usado, total del sistema de ficheros
+        self.arriba = 0.0          # segundos encendida
+        self.red_hist = deque(maxlen=muestras)
+        self.disco_hist = deque(maxlen=muestras)
+        self._red_prev = None
+        self._disco_prev = None
+        self._t_prev = None
+        self._iface = self._busca_iface()
+        self._disco_dev = self._busca_disco()
         self._prev = {}
         self._sondas, self._lentas = self._busca_sondas()
         self._freqs = glob.glob("/sys/devices/system/cpu/cpu[0-9]*/cpufreq/"
@@ -174,6 +186,49 @@ class Carga(object):
         self._rapido = False
         self.refresh(todo=True)
         self._id = GLib.timeout_add_seconds(cada, self._tick)
+
+    # ------------------------------------------------------ que mirar
+
+    @staticmethod
+    def _busca_iface():
+        """La interfaz por la que sale el trafico.
+
+        Se prefiere la de config, y si no esta levantada se coge la
+        primera fisica que lo este. 'lo' nunca: contarse a si mismo no
+        dice nada, y las de tunel tampoco, que su trafico ya va contado
+        por debajo en la fisica.
+        """
+        candidatas = [C.IFACE_WIFI] + sorted(
+            os.path.basename(x) for x in glob.glob("/sys/class/net/*"))
+        for n in candidatas:
+            if not n or n == "lo" or n.startswith(("tun", "tailscale",
+                                                   "docker", "veth", "br-")):
+                continue
+            if _read("/sys/class/net/%s/operstate" % n) == "up":
+                return n
+        return C.IFACE_WIFI
+
+    @staticmethod
+    def _busca_disco():
+        """El disco del sistema, el que tiene la raiz.
+
+        Se mira de que dispositivo cuelga "/" y se sube hasta el disco
+        entero: lo que interesa es cuanto se mueve el cacharro, no una
+        particion suelta.
+        """
+        try:
+            dev = os.stat("/").st_dev
+            mayor, menor = os.major(dev), os.minor(dev)
+            ruta = "/sys/dev/block/%d:%d" % (mayor, menor)
+            real = os.path.realpath(ruta)
+            nombre = os.path.basename(real)
+            # De "nvme0n1p2" al disco "nvme0n1"; de "sda1" a "sda".
+            padre = os.path.basename(os.path.dirname(real))
+            if padre and padre != "block" and nombre.startswith(padre):
+                return padre
+            return nombre
+        except OSError:
+            return ""
 
     # ------------------------------------------------------- sondas
 
@@ -266,6 +321,8 @@ class Carga(object):
                 self.temps[titulo] = int(v) / 1000.0
         v = _read(self._bat)
         self.vatios = int(v) / 1e6 if v.isdigit() else None
+        self._trafico()
+        self._espacio()
         try:
             self.carga1 = float(_read("/proc/loadavg").split()[0])
         except (ValueError, IndexError):
@@ -323,6 +380,63 @@ class Carga(object):
                 freqs.append(int(v))
         self.ghz = (sum(freqs) / len(freqs) / 1e6) if freqs else 0.0
 
+    def _trafico(self):
+        """Red y disco en bytes por segundo.
+
+        Son contadores desde el arranque, como /proc/stat: lo que se
+        enseña es la diferencia entre dos lecturas partida por el tiempo
+        que ha pasado de verdad, no por el periodo nominal del
+        temporizador --que no se cumple si la maquina esta ocupada, y
+        entonces las tasas saldrian infladas-.
+        """
+        ahora = time.monotonic()
+        dt = (ahora - self._t_prev) if self._t_prev else 0.0
+        self._t_prev = ahora
+
+        base = "/sys/class/net/%s/statistics/" % self._iface
+        rx, tx = _read(base + "rx_bytes"), _read(base + "tx_bytes")
+        if rx.isdigit() and tx.isdigit():
+            par = (int(rx), int(tx))
+            if self._red_prev and dt > 0.05:
+                self.red = (max(0.0, (par[0] - self._red_prev[0]) / dt),
+                            max(0.0, (par[1] - self._red_prev[1]) / dt))
+                self.red_hist.append(self.red[0] + self.red[1])
+            self._red_prev = par
+
+        if self._disco_dev:
+            try:
+                with open("/proc/diskstats") as f:
+                    for linea in f:
+                        campos = linea.split()
+                        if len(campos) > 9 and campos[2] == self._disco_dev:
+                            # Sectores de 512 bytes: leidos (campo 5) y
+                            # escritos (campo 9).
+                            par = (int(campos[5]) * 512,
+                                   int(campos[9]) * 512)
+                            if self._disco_prev and dt > 0.05:
+                                self.disco = (
+                                    max(0.0, (par[0] - self._disco_prev[0]) / dt),
+                                    max(0.0, (par[1] - self._disco_prev[1]) / dt))
+                                self.disco_hist.append(
+                                    self.disco[0] + self.disco[1])
+                            self._disco_prev = par
+                            break
+            except (OSError, ValueError):
+                pass
+
+    def _espacio(self):
+        try:
+            st = os.statvfs("/")
+            total = st.f_blocks * st.f_frsize
+            libre = st.f_bavail * st.f_frsize
+            self.disco_uso = (max(0, total - libre), total)
+        except OSError:
+            pass
+        try:
+            self.arriba = float(_read("/proc/uptime").split()[0])
+        except (ValueError, IndexError):
+            pass
+
     def _memoria(self):
         total = disponible = 0
         try:
@@ -337,6 +451,18 @@ class Carga(object):
             return
         self.mem_total = total
         self.mem_usada = max(0, total - disponible)
+        st = sf = 0
+        try:
+            with open("/proc/meminfo") as f:
+                for linea in f:
+                    if linea.startswith("SwapTotal:"):
+                        st = int(linea.split()[1]) * 1024
+                    elif linea.startswith("SwapFree:"):
+                        sf = int(linea.split()[1]) * 1024
+                        break
+        except OSError:
+            pass
+        self.swap = (max(0, st - sf), st)
 
     # -------------------------------------------------------- ayudas
 
