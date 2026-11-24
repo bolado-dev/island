@@ -938,24 +938,28 @@ class Island(Gtk.Window):
         if self.dnd:
             row.add(R.Row([self._ico("bell-off", 28, T.ORANGE)], tag="dnd"))
             row.add(R.Gap(T.GAP_ITEM))
-        # Carga de la maquina: una grafica diminuta y sin numeros. De
-        # reojo no se lee "47%", se ve si la cosa viene subiendo; el
-        # numero esta a un clic. Se pinta del color de la temperatura,
-        # que es la unica parte de esto que a veces es mala noticia.
-        # Dos columnas: procesador y memoria, en el mismo orden que
-        # dentro del panel. La del procesador va encendida y la de
-        # memoria apagada: sin jerarquia no se sabe cual es cual, y la
-        # que de verdad se mira de reojo es la primera. El color de la
-        # del procesador lo pone la temperatura, y la de memoria se
-        # enciende en rojo solo cuando queda poca, que es cuando pasa a
-        # ser una noticia.
+        # Carga de la maquina: un anillo doble y sin numeros. De reojo
+        # no se lee "47%", se ve cuanto hay y si viene subiendo; el
+        # numero esta a un clic. Fuera el procesador y dentro la
+        # memoria, el mismo orden que dentro del panel: el arco de
+        # fuera es el mas largo y el primero que se ve, y de los dos el
+        # que de verdad se mira de reojo es la carga.
+        #
+        # El del procesador se pinta del color de la temperatura, que
+        # es la unica parte de esto que a veces es mala noticia. El de
+        # memoria va en azul --el mismo de su barra dentro del panel--
+        # y no en gris: a este tamano dos arcos que solo se distinguen
+        # por el brillo se leen como un borron, y el tono los separa de
+        # un vistazo sin quitarle jerarquia al de fuera, que sigue
+        # siendo el blanco. En rojo solo cuando queda poca, que es
+        # cuando la maquina empieza a tirar de intercambio.
         llena = self.barra_mem[0] > T.MEM_AVISO
         row.add(R.Row([
-            R.Columnas(self.barra_cpu, T.CARGA_BAR_W, 0, T.CARGA_H,
-                       self._color_temp(self.carga.temp_cpu, T.FG)),
-            R.Gap(T.CARGA_BAR_GAP),
-            R.Columnas(self.barra_mem, T.CARGA_BAR_W, 0, T.CARGA_H,
-                       T.RED if llena else T.DIM),
+            R.Aros(self.barra_cpu, self.barra_mem,
+                   T.CARGA_D, T.CARGA_GROSOR,
+                   self._color_temp(self.carga.temp_cpu, T.FG),
+                   T.RED if llena else T.ACCENT,
+                   hueco=T.CARGA_HUECO),
         ], tag="carga"))
         row.add(R.Gap(T.GAP_ITEM))
 

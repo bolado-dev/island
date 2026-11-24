@@ -631,10 +631,13 @@ G_SEND       = ""
 # se mira de reojo no es "47%", es si la cosa viene subiendo. El numero
 # esta a un clic.
 # ---------------------------------------------------------------------
-# Las dos columnas del notch: procesador y memoria.
-CARGA_BAR_W = 6
-CARGA_BAR_GAP = 4
-CARGA_H   = 20
+# El anillo doble del notch: fuera el procesador, dentro la memoria.
+# 24 y no 20 porque el notch mide 34 de alto y el anillo tiene que
+# respirar; 3,2 de grosor es lo mas fino que sigue leyendose a un metro
+# de la pantalla, que es desde donde se mira esto.
+CARGA_D      = 28
+CARGA_GROSOR = 3.0
+CARGA_HUECO  = 3.2
 # Memoria a partir de la cual la columna se pone en rojo. Por debajo es
 # un dato; por encima es el aviso de que la maquina va a empezar a
 # tirar de intercambio, que es de donde salen los tirones.

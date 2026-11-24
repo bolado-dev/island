@@ -670,6 +670,61 @@ class Columnas(object):
             x += self.w + self.gap
 
 
+class Aros(object):
+    """Dos arcos concentricos, como el reloj de Apple.
+
+    Dos columnas de seis pixeles eran dos rayas: se veia que habia
+    algo, no cuanto marcaba. Un anillo da mucha mas superficie de color
+    en el mismo sitio --el trazo recorre todo el perimetro en vez de
+    subir por una linea recta-- y el gesto de "se va llenando en
+    sentido horario" se lee sin leer ningun numero.
+
+    Fuera el procesador y dentro la memoria, en ese orden a proposito:
+    el de fuera es el arco mas largo y el que primero se ve, y de los
+    dos el que de verdad se mira de reojo es la carga.
+
+    Lee las listas EN VIVO, igual que Columnas: el contenido de la isla
+    no se reconstruye en cada muestra, asi que un valor copiado al
+    construir se quedaria clavado en el primero.
+    """
+    def __init__(self, fuera, dentro, d, grosor, col_fuera, col_dentro,
+                 hueco=2.0, bg=T.SURF_2):
+        self.fuera, self.dentro = fuera, dentro
+        self.d, self.grosor, self.hueco = d, grosor, hueco
+        self.col_fuera, self.col_dentro = col_fuera, col_dentro
+        self.bg = bg
+
+    def size(self, cr):
+        return self.d, self.d
+
+    def draw(self, cr, x, cy, a):
+        cx = x + self.d / 2.0
+        r = (self.d - self.grosor) / 2.0
+        cr.set_line_width(self.grosor)
+        for vals, col in ((self.fuera, self.col_fuera),
+                          (self.dentro, self.col_dentro)):
+            if r < self.grosor * 0.6:
+                break
+            v = max(0.0, min(1.0, vals[0] if vals else 0.0))
+            # La pista entera, con remate plano: es una circunferencia
+            # cerrada y los extremos no se ven.
+            cr.set_line_cap(cairo.LINE_CAP_BUTT)
+            cr.set_source_rgba(*self.bg, a)
+            cr.arc(cx, cy, r, 0, 2 * math.pi)
+            cr.stroke()
+            if v > 0.004:
+                # El arco lleno arranca ARRIBA y gira en sentido
+                # horario: es de donde sale la lectura de reloj. Con
+                # remate redondo, y por eso el minimo no es cero sino un
+                # arco corto: al 1% se ve un punto, no nada.
+                cr.set_line_cap(cairo.LINE_CAP_ROUND)
+                cr.set_source_rgba(*col, a)
+                ini = -math.pi / 2.0
+                cr.arc(cx, cy, r, ini, ini + 2 * math.pi * v)
+                cr.stroke()
+            r -= self.grosor + self.hueco
+
+
 class Slider(object):
     """Barra arrastrable (volumen, brillo).
 
