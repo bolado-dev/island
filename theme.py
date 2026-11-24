@@ -631,11 +631,14 @@ G_SEND       = ""
 # se mira de reojo no es "47%", es si la cosa viene subiendo. El numero
 # esta a un clic.
 # ---------------------------------------------------------------------
-CARGA_N   = 8         # barras de la grafica del notch
-CARGA_BAR_W = 3
-CARGA_BAR_GAP = 3
-CARGA_H   = 18
-CARGA_MIN = 3
+# Las dos columnas del notch: procesador y memoria.
+CARGA_BAR_W = 6
+CARGA_BAR_GAP = 4
+CARGA_H   = 20
+# Memoria a partir de la cual la columna se pone en rojo. Por debajo es
+# un dato; por encima es el aviso de que la maquina va a empezar a
+# tirar de intercambio, que es de donde salen los tirones.
+MEM_AVISO = 0.92
 SIS_ANCHO = 520       # panel
 SIS_CHISPA_W = 200
 SIS_CHISPA_H = 40

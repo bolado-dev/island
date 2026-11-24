@@ -311,7 +311,11 @@ class Island(Gtk.Window):
         # sea correcto.
         self.sp_cpu = Spring(0.0, response=0.30, damping=1.0, escala=0.01)
         self.carga_cols = []       # por nucleo, suavizado
-        self.carga_barras = []     # las del notch, suavizadas
+        # Las dos columnas del notch. Listas de un elemento y no
+        # numeros sueltos porque el dibujo las lee EN VIVO: el
+        # contenido no se reconstruye en cada muestra.
+        self.barra_cpu = [0.0]
+        self.barra_mem = [0.0]
 
         # Servidor de notificaciones. La isla toma el nombre de D-Bus y
         # recibe los avisos de primera mano: es la unica forma de tener
@@ -938,16 +942,21 @@ class Island(Gtk.Window):
         # reojo no se lee "47%", se ve si la cosa viene subiendo; el
         # numero esta a un clic. Se pinta del color de la temperatura,
         # que es la unica parte de esto que a veces es mala noticia.
-        # Barras y no linea, por dos razones. A 45 px de ancho y con la
-        # maquina al 100%, un area rellena se ve como un bloque gris y
-        # una linea sola no se ve; y sobre todo, la isla ya tiene su
-        # forma de dibujar "algo que va pasando": la onda del dictado.
-        # Las viejas se apagan hacia la izquierda, asi que ademas se ve
-        # de que lado viene el tiempo.
-        row.add(R.Row([R.Wave(self.carga_barras,
-                              self._color_temp(self.carga.temp_cpu, T.DIM),
-                              T.CARGA_N, T.CARGA_BAR_W, T.CARGA_BAR_GAP,
-                              T.CARGA_H, T.CARGA_MIN)], tag="carga"))
+        # Dos columnas: procesador y memoria, en el mismo orden que
+        # dentro del panel. La del procesador va encendida y la de
+        # memoria apagada: sin jerarquia no se sabe cual es cual, y la
+        # que de verdad se mira de reojo es la primera. El color de la
+        # del procesador lo pone la temperatura, y la de memoria se
+        # enciende en rojo solo cuando queda poca, que es cuando pasa a
+        # ser una noticia.
+        llena = self.barra_mem[0] > T.MEM_AVISO
+        row.add(R.Row([
+            R.Columnas(self.barra_cpu, T.CARGA_BAR_W, 0, T.CARGA_H,
+                       self._color_temp(self.carga.temp_cpu, T.FG)),
+            R.Gap(T.CARGA_BAR_GAP),
+            R.Columnas(self.barra_mem, T.CARGA_BAR_W, 0, T.CARGA_H,
+                       T.RED if llena else T.DIM),
+        ], tag="carga"))
         row.add(R.Gap(T.GAP_ITEM))
 
         # Cada icono de estado va envuelto en una fila con etiqueta: es
@@ -1634,16 +1643,18 @@ class Island(Gtk.Window):
         animacion no cueste cuando no se ve.
         """
         destino = [n / 100.0 for n in self.carga.nucleos]
-        h = list(self.carga.hist)[-T.CARGA_N:]
-        h = [0.0] * max(0, T.CARGA_N - len(h)) + h
+        cpu = [max(0.0, min(1.0, self.carga.cpu / 100.0))]
+        mem = [max(0.0, min(1.0, self.carga.mem_frac))]
         if self.oculto:
-            self.carga_cols, self.carga_barras = list(destino), list(h)
+            self.carga_cols = list(destino)
+            self.barra_cpu[:] = cpu
+            self.barra_mem[:] = mem
             return False
 
         k = min(1.0, dt * T.CARGA_SUAVE)
         movio = False
         for lista, fin in ((self.carga_cols, destino),
-                           (self.carga_barras, h)):
+                           (self.barra_cpu, cpu), (self.barra_mem, mem)):
             if len(lista) != len(fin):
                 lista[:] = list(fin)
                 movio = movio or bool(fin)

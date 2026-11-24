@@ -326,11 +326,17 @@ island-send tiempo --target pomo --state skip
   <img src="docs/launcher.gif" alt="El lanzador con una búsqueda escrita; al volver a pulsar super y d se cierra y el notch se repliega" width="760">
 </p>
 
-**Carga de la máquina.** En reposo, ocho barritas al lado del resto del
-estado: no dicen «47%», dicen si la cosa viene subiendo. Se pintan del color
-de la temperatura, que es la única parte de esto que a veces es una mala
-noticia — naranja a partir de `TEMP_TIBIO` (85°), rojo a partir de `TEMP_ARDE`
-(95°). Un clic las abre.
+**Carga de la máquina.** En reposo, dos columnas al lado del resto del estado:
+procesador y memoria, en el mismo orden que dentro del panel. No dicen «47%»,
+dicen si la cosa viene subiendo. La del procesador va **encendida** y la de
+memoria **apagada**, y esa jerarquía no es decoración: sin ella no se sabe
+cuál es cuál, y la que se mira de reojo es la primera.
+
+El color lo pone lo que significa. La del procesador se tiñe con la
+temperatura —naranja a partir de `TEMP_TIBIO` (85°), rojo a partir de
+`TEMP_ARDE` (95°)— y la de memoria se enciende en rojo solo al pasar de
+`MEM_AVISO` (92%), que es cuando la máquina va a empezar a tirar de
+intercambio y de ahí salen los tirones. Un clic las abre.
 
 <p align="center">
   <img src="docs/panel-sistema.png" alt="Panel de sistema: CPU al 100% con su historial, una barra por núcleo, frecuencia y temperatura, memoria usada con barra, y abajo disco, wifi, vatios y carga media" width="640">
