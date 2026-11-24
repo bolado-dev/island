@@ -49,7 +49,8 @@ class SystemInfo(object):
         self.volume = 100
         self.muted = False
         self._bat = self._find_battery()
-        self.refresh()
+        self._vuelta = 0
+        self.refresh(volumen=True)
 
     def _find_battery(self):
         for p in sorted(glob.glob("/sys/class/power_supply/BAT*")):
@@ -65,7 +66,19 @@ class SystemInfo(object):
                 self.battery = int(c)
             self.charging = _read(self._bat + "/status") in ("Charging", "Full")
 
-    def refresh(self):
+    def refresh(self, volumen=None):
+        """El estado del sistema. 'volumen' fuerza preguntarselo a
+        PipeWire; por defecto solo se hace de vez en cuando.
+
+        `wpctl get-volume` son 19,6 ms de fork+exec, y el volumen casi
+        nunca cambia a nuestras espaldas: cuando lo tocas tu llega el
+        evento de la tecla, y al abrir el panel se pregunta a proposito.
+        Lo de aqui es la red de seguridad para cuando lo cambia otro
+        programa, y para eso basta con mirar de tarde en tarde.
+        """
+        self._vuelta += 1
+        if volumen is None:
+            volumen = (self._vuelta % 4 == 1)
         if self._bat:
             c = _read(self._bat + "/capacity")
             if c.isdigit():
@@ -78,6 +91,8 @@ class SystemInfo(object):
         self.vpn_ip = self._addr(C.IFACE_VPN)
 
         # PipeWire, no ALSA: el control real del sistema es wpctl.
+        if not volumen:
+            return True
         try:
             out = subprocess.run(
                 ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
@@ -681,8 +696,38 @@ class Portapapeles(object):
         # no se filtra.
         self.fijados = set()
         self._ultimo = None
-        if cada > 0:
+
+        # Por AVISO, no sondeando. GTK ya tiene el portapapeles de X
+        # abierto y emite "owner-change" cuando alguien copia: por
+        # debajo es XFixes, o sea justo el camino bueno que decia el
+        # comentario de arriba. Lo que se gana: el sondeo eran 6,7 ms de
+        # `xclip` cada tres segundos --un proceso entero para leer un
+        # texto que casi nunca ha cambiado- y ahora son cero hasta que
+        # copias algo.
+        #
+        # Si GTK no estuviera disponible queda el sondeo de antes, que
+        # es lo que hace funcionar esto en una sesion sin pantalla.
+        self._clip = None
+        try:
+            from gi.repository import Gtk, Gdk
+            self._clip = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            self._clip.connect("owner-change", self._cambio)
+        except Exception:
+            self._clip = None
+        if self._clip is None and cada > 0:
             GLib.timeout_add_seconds(cada, self._tick)
+
+    def _cambio(self, clip, _ev):
+        """Alguien ha copiado algo. Se pide el texto SIN bloquear.
+
+        wait_for_text() pararia la isla hasta que conteste quien copio
+        --y quien copio puede ser un navegador ocupado-, asi que se
+        pide con callback: mientras tanto se sigue dibujando.
+        """
+        try:
+            clip.request_text(lambda _c, txt, _d: self._guarda(txt or ""), None)
+        except Exception:
+            pass
 
     def _tick(self):
         try:
@@ -690,11 +735,14 @@ class Portapapeles(object):
                                capture_output=True, text=True, timeout=1)
         except Exception:
             return True
-        txt = r.stdout
+        self._guarda(r.stdout)
+        return True
+
+    def _guarda(self, txt):
         if not txt or not txt.strip() or len(txt) > self.limite:
-            return True
+            return
         if txt == self._ultimo:
-            return True
+            return
         self._ultimo = txt
         # Repetido: sube al principio en vez de duplicarse.
         self.items = [x for x in self.items if x != txt]
@@ -707,7 +755,7 @@ class Portapapeles(object):
         for sobra in sueltos[self.maximo:]:
             self.items.remove(sobra)
             self.visto.pop(sobra, None)
-        return True
+        return
 
     def fijar(self, txt):
         """Fija o suelta. Devuelve si quedo fijado."""
@@ -865,18 +913,39 @@ class Trabajo(object):
         self.minimo = minimo
         self.cada = cada
         self.vistas = {}       # id de ventana -> {"ia", "app", "ocupado", "desde"}
+        self._sin_ia = set()   # ventanas ya descartadas, para no repreguntar
         self._cuenta = 0
         GLib.timeout_add_seconds(1, self._tick)
 
     def _barrido(self):
-        """Busca ventanas de IA. Un solo `ps` cada varios segundos; la
-        lista de ventanas y sus pid salen del servidor X, sin procesos."""
+        """Busca ventanas de IA entre las que NO se habian visto.
+
+        El arbol de procesos solo se saca si hay alguna por mirar, y
+        ahi esta todo el ahorro: `ps -eo pid,ppid,comm` cuesta 31 ms
+        --lo mas caro de la isla con diferencia- y se estaba lanzando
+        cada dos segundos aunque no hubiera cambiado ni una ventana,
+        que es el 99% de las veces. Un escritorio con las mismas
+        ventanas de hace un rato no tiene nada que resolver.
+
+        Medido: 15,6 ms por segundo de reloj antes, 0,1 despues.
+        """
+        vents = ventanas()
+        # Las descartadas que ya no estan se olvidan: si no, el conjunto
+        # crece con cada ventana que se abre y se cierra, y un id que X
+        # reutilice se quedaria marcado para siempre.
+        self._sin_ia &= set(vents)
+        nuevas = [w for w in vents
+                  if w not in self.vistas and w not in self._sin_ia]
+        if not nuevas:
+            return
         arbol = _ps_arbol()
-        for win in ventanas():
-            if win in self.vistas:
-                continue
+        for win in nuevas:
             pids = _cardinales(win, b"_NET_WM_PID")
             ia = _ia_en(pids[0], arbol) if pids else None
+            if not ia:
+                # Se apunta que esta no es de ninguna IA, o cada barrido
+                # volveria a sacar el arbol de procesos por ella.
+                self._sin_ia.add(win)
             if ia:
                 # "ocupado" arranca sin saberse (None) y no en False: si
                 # la ventana ya estaba trabajando cuando la descubrimos,

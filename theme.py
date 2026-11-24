@@ -649,3 +649,15 @@ SIS_COL_H = 34
 TEMP_TIBIO = 85
 TEMP_ARDE  = 95
 G_CPU = ""
+
+# Milisegundos entre fotogramas cuando lo unico que se mueve es una
+# animacion lenta: un latido, una barra indeterminada, el rayo del
+# cargador. A 30 pasos por segundo se ven exactamente igual que a 120 y
+# el bucle hace la cuarta parte de vueltas. Los muelles no entran aqui:
+# un tiron en un muelle se ve.
+MS_LENTO = 33
+
+# Paneles cuyo contenido depende de por donde anda el raton. El resto
+# no se reconstruye al moverlo: su realce lo pinta el rectangulo que se
+# desliza, que lee sus muelles en vivo.
+PANELES_HOVER = ("launcher", "emoji", "portapapeles", "battery")

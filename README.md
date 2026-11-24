@@ -748,6 +748,55 @@ Lo que no hace, a propósito: **el micrófono no se abre solo nunca**. Se abre
 cuando pulsas la tecla y se cierra cuando la sueltas. Un dictado que escucha
 "por si acaso" es un micro abierto en tu escritorio todo el día.
 
+### Lo que cuesta
+
+El coste de un widget que está siempre puesto no es lo que gasta cuando lo
+miras, es lo que gasta cuando **no** lo miras. Medido con el proceso parado y
+el notch replegado, tomando la ventana más tranquila de varias —la media
+miente, porque cualquier notificación que entre durante la medida la dispara—:
+
+| | antes | ahora |
+|---|---|---|
+| en reposo, máquina tranquila | 0,9% de un núcleo | **0,3%** |
+| en reposo, máquina cargada (load 118) | 4,5% | **0,4%** |
+| por fotograma, animando | 1,2–1,7 ms | **0,3–0,7 ms** |
+| vueltas del bucle con una animación lenta | 120/s | **30/s** |
+
+Las dos primeras filas son la misma medida con la máquina en dos estados, y la
+diferencia entre ellas es el fondo del asunto: lo que costaba era lanzar
+procesos, y un `fork+exec` se encarece **justo cuando la máquina está
+ocupada**, que es cuando menos te conviene. Lo que queda no depende de la
+carga porque ya no lanza nada.
+
+Y la medida hay que hacerla bien: los campos 14 y 15 de `/proc/<pid>/stat` son
+solo el proceso, y lo que cuesta un `ps` o un `xclip` se gasta **dentro del
+hijo** (campos 16 y 17). Midiendo solo los dos primeros, un `fork+exec` parece
+gratis — y resultó ser casi todo el gasto.
+
+De dónde salía:
+
+- **`ps -eo pid,ppid,comm` cada dos segundos**, para localizar ventanas de IA.
+  31 ms cada vez, lo más caro de la isla con diferencia. Ahora el árbol de
+  procesos solo se saca si hay alguna ventana **nueva** que mirar, y las que ya
+  se descartaron no se vuelven a preguntar: en un escritorio con las mismas
+  ventanas de hace un rato no hay nada que resolver.
+- **`xclip` cada tres segundos** para el historial del portapapeles. Ahora va
+  por aviso: GTK ya tiene el portapapeles abierto y emite `owner-change`
+  —XFixes por debajo—, así que no se pregunta nada hasta que copias algo. El
+  texto se pide con callback y no con `wait_for_text`, que pararía la isla
+  hasta que conteste quien copió.
+- **`wpctl get-volume` cada 15 s**: 19,6 ms de `fork+exec` para un dato que
+  casi nunca cambia a nuestras espaldas —cuando lo tocas tú llega el evento de
+  la tecla—. Ahora es la red de seguridad, una de cada cuatro vueltas.
+- **El bucle a 120 Hz para dibujar 25 veces por segundo.** Un muelle pide todos
+  los fotogramas que dé la pantalla porque el tirón se ve; un latido de 2,6 s o
+  una barra indeterminada se ven igual a 30. El ritmo ahora se ajusta a lo que
+  haya vivo.
+- **Una reconstrucción del contenido por cada fila que cruzaba el ratón** —23
+  por segundo, medidas—. Solo se rehace en los paneles cuyo contenido depende
+  del hover; en los demás el realce lo pinta el rectángulo que se desliza, que
+  lee sus muelles en vivo.
+
 ## Cómo funciona
 
 Una ventana `DOCK` transparente a todo el ancho, pegada arriba. No se

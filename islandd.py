@@ -276,6 +276,7 @@ class Island(Gtk.Window):
         self._prof = {"tick": 0, "draw": 0, "ms": 0.0, "max": 0.0,
                       "refresh": 0}
         self._per_ms = None        # periodo de fotograma, se calcula al usar
+        self._tick_ms = 0          # el que tiene AHORA el bucle
         self._grab_guard = None
         # Mas rapidos que los de la isla (0.38-0.50): el hover tiene que
         # sentirse inmediato, no "animado". Amortiguacion alta para que
@@ -2886,7 +2887,7 @@ class Island(Gtk.Window):
                 # Relectura puntual: el sondeo periodico es lento (15 s)
                 # a proposito, pero al abrir el panel el dato tiene que
                 # estar al dia.
-                self.sys.refresh()
+                self.sys.refresh(volumen=True)
             if which == "wifi":
                 self.wifi_nets = None
                 controls.wifi_scan(self._on_wifi)
@@ -3431,7 +3432,8 @@ class Island(Gtk.Window):
     def ensure_tick(self):
         if self._tick_id is None:
             self._last = time.monotonic()
-            self._tick_id = GLib.timeout_add(self._periodo_ms(),
+            self._tick_ms = self._periodo_ms()
+            self._tick_id = GLib.timeout_add(self._tick_ms,
                                              self._on_tick, None, None)
 
     def _on_tick(self, widget, clock):
@@ -3444,6 +3446,12 @@ class Island(Gtk.Window):
         # lee como progreso.
         self.anim = (self.anim + dt / 1.4) % 1.0
 
+        # 'moving' es "hay que seguir"; 'rapido' es "hace falta ir a la
+        # velocidad del monitor". No es lo mismo: un muelle pide todos
+        # los fotogramas que de la pantalla porque se ve el tiron, y un
+        # latido de 2,6 segundos o una barra indeterminada se ven igual
+        # a 30. Medido con el perfilador: el bucle corria a 120 para
+        # dibujar 25 veces por segundo.
         moving = False
         for s in (self.sp_w, self.sp_h, self.sp_fade, self.sp_y,
                   self.sp_hx, self.sp_hy, self.sp_hw, self.sp_hh, self.sp_ha,
@@ -3517,6 +3525,8 @@ class Island(Gtk.Window):
             self._ws_dirty = False
             self.refresh()
 
+        rapido = moving          # hasta aqui, todo lo que pide monitor
+
         # Una animacion ciclica no "se asienta" nunca: mientras este en
         # pantalla hay que seguir pidiendo fotogramas.
         if act is not None and act.kind == "power" and act.data.get("charging"):
@@ -3529,7 +3539,9 @@ class Island(Gtk.Window):
         # microfono y los puntos de "transcribiendo" laten solos.
         if act is not None and act.kind == "dictado" and \
                 (act.data.get("state") or "oyendo") in ("oyendo", "transcribiendo"):
-            moving = True
+            # La onda del dictado SI pide monitor: es una señal en
+            # tiempo real y a 30 se ve a trompicones.
+            moving = rapido = True
         # Panel del reloj con una cuenta en marcha: aqui se ven las
         # centesimas y la barra, asi que hacen falta fotogramas de
         # verdad. Solo con el panel ABIERTO, que son los segundos en que
@@ -3561,6 +3573,17 @@ class Island(Gtk.Window):
         if not moving:
             self._tick_id = None
             self.update_input_region()
+            return False
+
+        # El ritmo se ajusta a lo que haya: la velocidad del monitor
+        # mientras algo se mueve de verdad, y 30 pasos por segundo
+        # cuando lo unico vivo es una animacion lenta. Cambiar de ritmo
+        # es crear la fuente nueva y dejar morir esta devolviendo False.
+        quiere = self._periodo_ms() if rapido else T.MS_LENTO
+        if quiere != self._tick_ms:
+            self._tick_ms = quiere
+            self._tick_id = GLib.timeout_add(quiere, self._on_tick,
+                                             None, None)
             return False
         return True
 
@@ -4023,9 +4046,36 @@ class Island(Gtk.Window):
         gw.set_cursor(Gdk.Cursor.new_from_name(self.get_display(), name))
         self._cursor_ptr = pointer
 
+    def _hover_rehace(self, antes, ahora):
+        """Si el contenido depende de por donde anda el raton.
+
+        Antes se reconstruia con CUALQUIER panel abierto, y recorrer
+        una lista con el raton era una reconstruccion por fila: 23 por
+        segundo, medidas con el perfilador, y cada una vuelve a medir
+        con Pango todo lo que hay dentro.
+
+        La mayoria no lo necesita: en el calendario, en el wifi o en el
+        volumen el realce lo pinta el rectangulo que se desliza, que lee
+        sus muelles en vivo y no depende de que haya en el arbol. Los de
+        aqui si: el lanzador y el emoji mueven su seleccion, los perfiles
+        de energia y la captura ensenan la etiqueta de lo senalado, y una
+        notificacion tine el boton de debajo.
+        """
+        act = self.activities.get("panel")
+        cual = act.data.get("which") if act is not None else None
+        if cual in T.PANELES_HOVER:
+            return True
+        if "captura" in self.activities:
+            return True
+        for t in (antes, ahora):
+            if t and t.startswith(("noti", "cap:")):
+                return True
+        return False
+
     def _set_hover(self, tag, rect):
         if tag == self.hover:
             return
+        antes = self.hover
         self.hover = tag
         if tag is None:
             self.sp_ha.set(0.0)          # se desvanece donde este
@@ -4064,9 +4114,7 @@ class Island(Gtk.Window):
             if act is not None and act.expires is not None:
                 act.expires = max(act.expires, time.monotonic() + 3.0)
                 self._schedule_expiry()
-        if "panel" in self.activities or "captura" in self.activities:
-            # La tarjeta de la captura tambien depende del hover: el
-            # boton senalado se tine y el subtitulo dice lo que hace.
+        if self._hover_rehace(antes, tag):
             self.refresh()
         self.ensure_tick()
 
@@ -4125,7 +4173,7 @@ class Island(Gtk.Window):
         self.refresh()
 
     def _after_vol(self):
-        self.sys.refresh()
+        self.sys.refresh(volumen=True)
         self.refresh()
         return False
 
