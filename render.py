@@ -547,6 +547,81 @@ class BarIndef(object):
         cr.fill()
 
 
+class Chispa(object):
+    """Historial de carga como area rellena.
+
+    Lee la lista EN VIVO, igual que la onda del dictado: el contenido
+    de la isla no se reconstruye en cada muestra, asi que una copia
+    tomada al construir se quedaria congelada en el primer valor.
+
+    Area y no barras: lo que importa de una grafica de carga a 40 px de
+    ancho no es cada muestra, es la FORMA --si viene subiendo o si fue
+    un pico y ya paso-, y el relleno la cuenta de un vistazo.
+    """
+    def __init__(self, valores, w, h, color, alfa=0.30):
+        self.valores, self.w, self.h = valores, w, h
+        self.color, self.alfa = color, alfa
+
+    def size(self, cr):
+        return self.w, self.h
+
+    def draw(self, cr, x, cy, a):
+        vals = list(self.valores)
+        if len(vals) < 2:
+            return
+        y0 = cy + self.h / 2.0
+        paso = self.w / float(len(vals) - 1)
+        cr.save()
+        cr.move_to(x, y0)
+        for i, v in enumerate(vals):
+            v = max(0.0, min(1.0, v))
+            cr.line_to(x + i * paso, y0 - v * self.h)
+        cr.line_to(x + self.w, y0)
+        cr.close_path()
+        cr.set_source_rgba(*self.color, self.alfa * a)
+        cr.fill()
+
+        # La linea de arriba, mas viva que el relleno: es la que se
+        # sigue con la vista.
+        cr.move_to(x, y0 - max(0.0, min(1.0, vals[0])) * self.h)
+        for i, v in enumerate(vals):
+            cr.line_to(x + i * paso, y0 - max(0.0, min(1.0, v)) * self.h)
+        cr.set_source_rgba(*self.color, a)
+        cr.set_line_width(1.6)
+        cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        cr.stroke()
+        cr.restore()
+
+
+class Columnas(object):
+    """Una barra por nucleo, de abajo arriba.
+
+    Con doce nucleos, un numero por cada uno seria una tabla que hay
+    que leer. Doce barras se ven de golpe: lo que se busca aqui es si
+    la carga esta repartida o si hay uno clavado al 100%.
+    """
+    def __init__(self, valores, w, gap, h, color, bg=T.SURF_2):
+        self.valores, self.w, self.gap, self.h = valores, w, gap, h
+        self.color, self.bg = color, bg
+
+    def size(self, cr):
+        n = max(1, len(self.valores))
+        return n * self.w + (n - 1) * self.gap, self.h
+
+    def draw(self, cr, x, cy, a):
+        y0 = cy + self.h / 2.0
+        for v in self.valores:
+            v = max(0.0, min(1.0, v))
+            capsule(cr, x, y0 - self.h, self.w, self.h, self.w / 2.0)
+            cr.set_source_rgba(*self.bg, a)
+            cr.fill()
+            alto = max(self.w, self.h * v)
+            capsule(cr, x, y0 - alto, self.w, alto, self.w / 2.0)
+            cr.set_source_rgba(*self.color, a)
+            cr.fill()
+            x += self.w + self.gap
+
+
 class Slider(object):
     """Barra arrastrable (volumen, brillo).
 

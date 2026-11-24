@@ -295,7 +295,8 @@ ICON_GLYPH = {
     "play": G_PLAY, "pause": G_PAUSE, "reset": G_RESET, "skip": G_SKIP,
     "quita": G_QUITA,
     "mas": G_MAS, "menos": G_MENOS, "send": "\uf1d8",
-    "ajustes": "\uf013",
+    "ajustes": "\uf013", "cpu": "\uf2db", "memoria": "\uf1c0",
+    "disco": "\uf0a0", "vatios": "\uf0e7", "grafica": "\uf080",
 }
 
 
@@ -540,6 +541,8 @@ IA_COLOR = {
 # (clave, titulo, palabras por las que se encuentra, icono)
 # ---------------------------------------------------------------------
 ACCIONES = (
+    ("sistema", "Sistema",
+     "sistema carga cpu memoria temperatura sensores rendimiento", "cpu"),
     ("crono", "Cron\u00f3metro", "cronometro crono tiempo stopwatch medir",
      "crono"),
     ("temp", "Temporizador", "temporizador timer cuenta atras alarma minutos",
@@ -555,6 +558,7 @@ ACCIONES = (
 # Lo que dice el subtitulo de cada una, que es lo que va a pasar al
 # pulsar Intro y no una descripcion de lo que es.
 ACCION_SUB = {
+    "sistema": "Carga, temperatura y memoria",
     "crono": "Empieza a contar",
     "temp":  "Elige cu\u00e1nto",
     "pomo":  "Empieza la tanda",
@@ -618,3 +622,30 @@ NOTI_AVATAR = 72
 NOTI_CAMPO   = 320    # ancho del campo de respuesta
 NOTI_BARRA   = 300    # ancho de la barra de progreso de un aviso
 G_SEND       = ""
+
+# ---------------------------------------------------------------------
+# Carga de la maquina.
+#
+# El indicador de reposo es una grafica diminuta, sin numeros: lo que
+# se mira de reojo no es "47%", es si la cosa viene subiendo. El numero
+# esta a un clic.
+# ---------------------------------------------------------------------
+CARGA_N   = 8         # barras de la grafica del notch
+CARGA_BAR_W = 3
+CARGA_BAR_GAP = 3
+CARGA_H   = 18
+CARGA_MIN = 3
+SIS_ANCHO = 520       # panel
+SIS_CHISPA_W = 200
+SIS_CHISPA_H = 40
+SIS_BARRA = 10
+SIS_COL_W = 7         # barra de cada nucleo
+SIS_COL_GAP = 4
+SIS_COL_H = 34
+
+# Grados a partir de los cuales la temperatura deja de ser un dato y
+# pasa a ser un aviso. Un portatil a 85 esta trabajando; a 95 esta
+# estrangulandose.
+TEMP_TIBIO = 85
+TEMP_ARDE  = 95
+G_CPU = ""

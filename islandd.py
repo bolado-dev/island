@@ -299,6 +299,10 @@ class Island(Gtk.Window):
         self.sp_rec = Spring(0.0, response=0.34, damping=0.70, escala=0.01)
         self._cursor_ptr = None
         self.fifo = sources.Fifo(sources.FIFO, self.on_event)
+        # Carga de la maquina. Se muestrea sola cada dos segundos; la
+        # isla solo se entera para repintar, y solo si hay algo a la
+        # vista que lo enseñe.
+        self.carga = sources.Carga(self._on_carga)
 
         # Servidor de notificaciones. La isla toma el nombre de D-Bus y
         # recibe los avisos de primera mano: es la unica forma de tener
@@ -921,6 +925,22 @@ class Island(Gtk.Window):
         if self.dnd:
             row.add(R.Row([self._ico("bell-off", 28, T.ORANGE)], tag="dnd"))
             row.add(R.Gap(T.GAP_ITEM))
+        # Carga de la maquina: una grafica diminuta y sin numeros. De
+        # reojo no se lee "47%", se ve si la cosa viene subiendo; el
+        # numero esta a un clic. Se pinta del color de la temperatura,
+        # que es la unica parte de esto que a veces es mala noticia.
+        # Barras y no linea, por dos razones. A 45 px de ancho y con la
+        # maquina al 100%, un area rellena se ve como un bloque gris y
+        # una linea sola no se ve; y sobre todo, la isla ya tiene su
+        # forma de dibujar "algo que va pasando": la onda del dictado.
+        # Las viejas se apagan hacia la izquierda, asi que ademas se ve
+        # de que lado viene el tiempo.
+        row.add(R.Row([R.Wave(self.carga.hist,
+                              self._color_temp(self.carga.temp_cpu, T.DIM),
+                              T.CARGA_N, T.CARGA_BAR_W, T.CARGA_BAR_GAP,
+                              T.CARGA_H, T.CARGA_MIN)], tag="carga"))
+        row.add(R.Gap(T.GAP_ITEM))
+
         # Cada icono de estado va envuelto en una fila con etiqueta: es
         # lo que convierte el dibujo en una zona pulsable, porque las
         # etiquetas se registran al dibujar con su posicion real.
@@ -1370,6 +1390,9 @@ class Island(Gtk.Window):
         if which == "calendar":
             return self.build_reloj(cr)
 
+        if which == "sistema":
+            return self.build_sistema(cr)
+
         if which == "desktop":
             mono = controls.bspwm_layout() == "monocle"
             gap = controls.bspwm_gap()
@@ -1573,6 +1596,129 @@ class Island(Gtk.Window):
                                circle=T.ACCENT if es_hoy else None))
             filas.append(fila)
         return R.Stack(filas, gap=6, center=True)
+
+    @staticmethod
+    def _color_temp(t, normal=T.FG):
+        """Una temperatura solo es noticia a partir de cierto punto.
+
+        Un portatil a 85 grados esta trabajando; a 95 se esta
+        estrangulando. Por debajo es un dato mas y va del color de los
+        demas datos.
+        """
+        if t is None:
+            return normal
+        if t >= T.TEMP_ARDE:
+            return T.RED
+        if t >= T.TEMP_TIBIO:
+            return T.ORANGE
+        return normal
+
+    @staticmethod
+    def _gb(n):
+        return ("%.1f" % (n / 1073741824.0)).replace(".", ",")
+
+    def _on_carga(self):
+        """Hay muestra nueva. Solo se mueve lo que haga falta.
+
+        Con el panel abierto hay numeros que cambian, asi que se
+        reconstruye; en reposo basta con repintar, porque la grafica
+        lee su lista en vivo. Y replegado no se hace nada: no hay un
+        solo pixel que mirar.
+        """
+        act = self.activities.get("panel")
+        abierto = act is not None and act.data.get("which") == "sistema"
+        self.carga.acelera(abierto)
+        if abierto:
+            if self._dentro:
+                # Mirando el panel: no se cierra debajo de la nariz.
+                self._touch_panel()
+            self.refresh()
+        elif not self.oculto:
+            self._damage()
+
+    def build_sistema(self, cr):
+        """Carga de la maquina, con detalle.
+
+        Lo de arriba es el resumen que se mira un segundo --cuanto, a
+        cuantos grados y como viene-; lo de abajo, lo que se mira
+        cuando algo va mal: que nucleo esta clavado, cuanta memoria
+        queda, que mas se esta calentando.
+        """
+        c = self.carga
+        W = T.SIS_ANCHO
+        col = self._color_temp(c.temp_cpu, T.ACCENT)
+
+        # --- cabecera: CPU, el porcentaje, y el historial a la derecha
+        izq = R.Row([
+            self._ico("cpu", 26, T.DIM),
+            R.Gap(T.GAP_ITEM),
+            R.Text("CPU", T.F_SUB, T.DIM),
+            R.Gap(T.GAP_ITEM),
+            R.Rodillo(self._rodillo("cpu", "%d%%" % round(c.cpu)),
+                      T.F_TITLE, T.FG),
+        ])
+        chispa = R.Chispa(c.hist, T.SIS_CHISPA_W, T.SIS_CHISPA_H, col)
+        hueco = max(T.GAP_GROUP, W - izq.size(cr)[0] - T.SIS_CHISPA_W)
+        filas = [R.Row([izq, R.Gap(hueco), chispa]),
+                 R.Bar(W, T.SIS_BARRA, c.cpu / 100.0, col, T.SURF_2)]
+
+        # --- una barra por nucleo, y al lado lo que las explica
+        nucleos = R.Columnas([n / 100.0 for n in c.nucleos],
+                             T.SIS_COL_W, T.SIS_COL_GAP, T.SIS_COL_H, col)
+        detalle = R.Row([
+            R.Text("%d n\u00facleos" % len(c.nucleos), T.F_SMALL, T.DIM),
+            R.Gap(T.GAP_ITEM),
+            R.Text("\u00b7", T.F_SMALL, T.DIM2),
+            R.Gap(T.GAP_ITEM),
+            R.Text(("%.1f GHz" % c.ghz).replace(".", ","), T.F_SMALL, T.DIM),
+        ])
+        if c.temp_cpu is not None:
+            detalle.add(R.Gap(T.GAP_ITEM),
+                        R.Text("\u00b7", T.F_SMALL, T.DIM2),
+                        R.Gap(T.GAP_ITEM),
+                        R.Text("%d\u00b0" % round(c.temp_cpu), T.F_SMALL,
+                               self._color_temp(c.temp_cpu, T.DIM)))
+        hueco = max(T.GAP_GROUP,
+                    W - nucleos.size(cr)[0] - detalle.size(cr)[0])
+        filas.append(R.Row([nucleos, R.Gap(hueco), detalle]))
+
+        # --- memoria
+        filas.append(R.Rule(W, T.SURF_2))
+        cab = R.Row([
+            self._ico("memoria", 24, T.DIM),
+            R.Gap(T.GAP_ITEM),
+            R.Text("Memoria", T.F_SUB, T.DIM),
+        ])
+        cifra = R.Text("%s / %s GB" % (self._gb(c.mem_usada),
+                                       self._gb(c.mem_total)),
+                       T.F_SUB, T.FG)
+        hueco = max(T.GAP_GROUP, W - cab.size(cr)[0] - cifra.size(cr)[0])
+        filas.append(R.Row([cab, R.Gap(hueco), cifra]))
+        filas.append(R.Bar(W, T.SIS_BARRA, c.mem_frac, T.ACCENT, T.SURF_2))
+
+        # --- el resto de sondas, en una linea
+        pie = R.Row()
+        def dato(icono, texto, color=T.DIM):
+            if pie.items:
+                pie.add(R.Gap(T.GAP_GROUP))
+            pie.add(self._ico(icono, 22, T.DIM2), R.Gap(8),
+                    R.Text(texto, T.F_SMALL, color))
+        for titulo, icono in (("Disco", "disco"), ("Wifi", "wifi"),
+                              ("GPU", "cpu")):
+            t = c.temps.get(titulo)
+            if t is not None:
+                dato(icono, "%d\u00b0" % round(t), self._color_temp(t, T.DIM))
+        if c.vatios:
+            dato("vatios", ("%.1f W" % c.vatios).replace(".", ","))
+        # La carga media lleva su nombre delante: un "24,3" suelto al
+        # lado de un "100%" no se sabe de que es, y lo que dice es otra
+        # cosa --cuanta cola hay esperando turno, no cuanto se usa-.
+        dato("grafica", ("media %.1f" % c.carga1).replace(".", ","),
+             T.RED if c.carga1 > len(c.nucleos) * 1.5 else T.DIM)
+        if pie.items:
+            filas.append(R.Rule(W, T.SURF_2))
+            filas.append(pie)
+        return R.Stack(filas, gap=T.GAP_ROW - 6)
 
     # ----------------------------------------- reloj: crono, temp, pomo
 
@@ -3748,6 +3894,8 @@ class Island(Gtk.Window):
         elif tag in ("vol", "net", "bat", "clock"):
             self.open_panel({"vol": "volume", "net": "wifi",
                              "bat": "battery", "clock": "calendar"}[tag])
+        elif tag == "carga":
+            self.open_panel("sistema")
         elif tag.startswith("rel:"):
             self._reloj_ir(tag[4:])
         elif tag.startswith(("cro:", "tmp:", "pom:")):
@@ -3857,7 +4005,7 @@ class Island(Gtk.Window):
         if tag == "vol-slider":
             return False
         return (tag in ("vol", "net", "bat", "power", "vol-mute",
-                        "vol-mixer", "clock")
+                        "vol-mixer", "clock", "carga")
                 or tag == "dnd" or tag.startswith("ws")
                 or tag.startswith(("prof:", "wifi:", "cal:", "act:", "app:",
                                    "ds:", "media:", "emo:", "cap:", "pp:",

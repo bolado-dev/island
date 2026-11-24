@@ -326,6 +326,40 @@ island-send tiempo --target pomo --state skip
   <img src="docs/launcher.gif" alt="El lanzador con una búsqueda escrita; al volver a pulsar super y d se cierra y el notch se repliega" width="760">
 </p>
 
+**Carga de la máquina.** En reposo, ocho barritas al lado del resto del
+estado: no dicen «47%», dicen si la cosa viene subiendo. Se pintan del color
+de la temperatura, que es la única parte de esto que a veces es una mala
+noticia — naranja a partir de `TEMP_TIBIO` (85°), rojo a partir de `TEMP_ARDE`
+(95°). Un clic las abre.
+
+<p align="center">
+  <img src="docs/panel-sistema.png" alt="Panel de sistema: CPU al 100% con su historial, una barra por núcleo, frecuencia y temperatura, memoria usada con barra, y abajo disco, wifi, vatios y carga media" width="640">
+</p>
+
+Dentro está lo que se mira cuando algo va mal: el historial de los últimos
+minutos, **una barra por núcleo** —con doce, lo que importa no es el número de
+cada uno sino si la carga está repartida o hay uno clavado—, la frecuencia
+media, la memoria, y abajo las demás sondas: disco, wifi, vatios que está
+chupando y la carga media (con su nombre delante, porque un «24,3» al lado de
+un «100%» no se sabe de qué es y además dice otra cosa: cuánta cola hay
+esperando turno, no cuánto se usa).
+
+**No llama a `sensors`.** lm-sensors lee `/sys/class/hwmon`, así que invocarlo
+sería un `fork+exec` cada dos segundos para que otro programa haga el mismo
+`open()` y encima devuelva texto traducido que habría que volver a parsear. Lo
+único que aporta `sensors-detect` es cargar módulos del kernel para chips
+raros; si en tu máquina hace falta, lo que verás después es **más ficheros
+ahí**, y la isla los encuentra sola — busca los chips por nombre (`coretemp`,
+`k10temp`, `nvme`, `amdgpu`…) y no por ruta, porque los números de `hwmon`
+bailan entre arranques.
+
+Y mide cuánto cuesta cada sonda al arrancar, en vez de suponerlo: leer la del
+procesador son 0,07 ms porque el kernel ya la tiene, y la del NVMe **6,2**,
+porque cada lectura manda un comando al disco. Las caras se consultan una de
+cada diez vueltas, así que la muestra normal baja de 8 ms a uno. Con el panel
+abierto se muestrea cada segundo; cerrado, cada dos; y con el notch replegado
+no se repinta nada.
+
 **Lanzador.** Aplicaciones, ventanas abiertas, una calculadora, ejecución de
 comandos, lo último que has copiado y las herramientas del propio notch, en
 una sola lista ordenada por relevancia y por uso. Las ventanas

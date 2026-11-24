@@ -17,6 +17,7 @@ import hashlib
 import shutil
 import socket
 import stat
+from collections import deque
 import fcntl
 import struct
 import threading
@@ -108,6 +109,217 @@ class SystemInfo(object):
             return ""            # interfaz inexistente o sin IPv4
         finally:
             sock.close()
+
+
+class Carga(object):
+    """Carga de la maquina: CPU, memoria, temperaturas y consumo.
+
+    Todo sale de /proc y /sys. NO se llama a `sensors`: lm-sensors lee
+    exactamente esos mismos ficheros, asi que invocarlo seria un
+    fork+exec cada dos segundos para que otro programa haga el mismo
+    open() y encima devuelva texto traducido que habria que volver a
+    parsear. Lo unico que aporta lm-sensors es `sensors-detect`, que
+    carga modulos del kernel para chips raros; si ese paso hace falta
+    en tu maquina, lo que aparece despues son mas ficheros aqui.
+
+    Guarda historial para la grafica. Con 90 muestras a uno cada dos
+    segundos son los ultimos tres minutos.
+    """
+
+    # Etiquetas de hwmon que interesan, por nombre del chip. El resto
+    # se ignora: acpitz en esta maquina devuelve 0 grados siempre, y
+    # una lectura falsa es peor que ninguna.
+    CHIPS = (("coretemp", "CPU"), ("k10temp", "CPU"), ("zenpower", "CPU"),
+             ("nvme", "Disco"), ("amdgpu", "GPU"), ("nouveau", "GPU"),
+             ("iwlwifi", "Wifi"))
+
+    def __init__(self, al_muestrear=None, muestras=90, cada=2):
+        self.al_muestrear = al_muestrear
+        self.cada = cada
+        # Vacio, no relleno de ceros: con ceros, recien arrancada la
+        # isla, la grafica diria que la maquina llevaba tres minutos
+        # sin hacer nada. Lo que hay se reparte a lo ancho y la
+        # resolucion va creciendo sola.
+        self.hist = deque(maxlen=muestras)
+        self.nucleos = []          # % por nucleo, en orden
+        self.cpu = 0.0             # % total
+        self.mem_usada = 0         # bytes
+        self.mem_total = 0
+        self.temps = {}            # "CPU" -> grados
+        self.vatios = None
+        self.ghz = 0.0
+        self.carga1 = 0.0          # load average de un minuto
+        self._prev = {}
+        self._sondas, self._lentas = self._busca_sondas()
+        self._freqs = glob.glob("/sys/devices/system/cpu/cpu[0-9]*/cpufreq/"
+                                "scaling_cur_freq")
+        self._bat = "/sys/class/power_supply/BAT0/power_now"
+        self._vuelta = 0
+        self.refresh(todo=True)
+        self._id = GLib.timeout_add_seconds(cada, self._tick)
+
+    # ------------------------------------------------------- sondas
+
+    def _busca_sondas(self):
+        """Donde esta cada temperatura, buscado UNA vez.
+
+        Los numeros de hwmon bailan entre arranques --hwmon6 hoy puede
+        ser hwmon2 manana-, asi que se localizan por el nombre del chip
+        y no por la ruta.
+        """
+        sondas = {}
+        for d in sorted(glob.glob("/sys/class/hwmon/hwmon*")):
+            nombre = _read(os.path.join(d, "name"))
+            for clave, titulo in self.CHIPS:
+                if not nombre.startswith(clave):
+                    continue
+                if titulo in sondas:
+                    break
+                sondas[titulo] = self._mejor_temp(d)
+                break
+        sondas = dict((k, v) for k, v in sondas.items() if v)
+
+        # Cuales son CARAS, medido y no supuesto. No todas las sondas
+        # cuestan lo mismo: leer la del procesador son 0,07 ms porque
+        # el kernel ya la tiene, y la del NVMe 6,2 ms porque cada
+        # lectura manda un comando al disco. A una muestra cada dos
+        # segundos eso es despertar al disco 43.000 veces al dia para
+        # un numero que cambia despacio.
+        lentas = set()
+        for titulo, ruta in sondas.items():
+            t0 = time.monotonic()
+            _read(ruta)
+            if (time.monotonic() - t0) > 0.002:
+                lentas.add(titulo)
+        return sondas, lentas
+
+    @staticmethod
+    def _mejor_temp(d):
+        """De un chip con varias sondas, la que resume.
+
+        En un Intel moderno hay una por nucleo y una de paquete: la de
+        paquete es la que vale, porque es la mas alta y la que dice si
+        la maquina esta pasandolo mal. En un NVMe, "Composite".
+        """
+        mejor = None
+        for f in sorted(glob.glob(os.path.join(d, "temp*_input"))):
+            etiqueta = _read(f[:-6] + "_label").lower()
+            if "package" in etiqueta or "composite" in etiqueta or \
+                    "tctl" in etiqueta or "edge" in etiqueta:
+                return f
+            if mejor is None:
+                mejor = f
+        return mejor
+
+    # ------------------------------------------------------ muestreo
+
+    def _tick(self):
+        self.refresh()
+        if self.al_muestrear:
+            self.al_muestrear()
+        return True
+
+    def refresh(self, todo=False):
+        self._vuelta += 1
+        # Las sondas caras, una de cada diez vueltas: la temperatura de
+        # un disco no cambia en dos segundos, y asi la muestra normal
+        # baja de 8 ms a menos de uno.
+        lentas = todo or (self._vuelta % 10 == 1)
+        self._cpu()
+        self._memoria()
+        for titulo, ruta in self._sondas.items():
+            if titulo in self._lentas and not lentas:
+                continue
+            v = _read(ruta)
+            if v.lstrip("-").isdigit():
+                self.temps[titulo] = int(v) / 1000.0
+        v = _read(self._bat)
+        self.vatios = int(v) / 1e6 if v.isdigit() else None
+        try:
+            self.carga1 = float(_read("/proc/loadavg").split()[0])
+        except (ValueError, IndexError):
+            pass
+
+    def _cpu(self):
+        """Uso por nucleo a partir de /proc/stat.
+
+        Un porcentaje de CPU solo existe entre DOS lecturas: lo que hay
+        en /proc/stat son contadores desde el arranque, asi que se
+        guarda la anterior y se mira el reparto del tiempo transcurrido.
+        """
+        nucleos = []
+        try:
+            with open("/proc/stat") as f:
+                for linea in f:
+                    if not linea.startswith("cpu"):
+                        break
+                    partes = linea.split()
+                    cual = partes[0]
+                    nums = [int(x) for x in partes[1:11]]
+                    total, ocio = sum(nums), nums[3] + nums[4]
+                    antes = self._prev.get(cual)
+                    self._prev[cual] = (total, ocio)
+                    if antes is None or total <= antes[0]:
+                        pct = 0.0
+                    else:
+                        dt, docio = total - antes[0], ocio - antes[1]
+                        pct = max(0.0, min(100.0, 100.0 * (dt - docio) / dt))
+                    if cual == "cpu":
+                        self.cpu = pct
+                        self.hist.append(pct / 100.0)
+                    else:
+                        nucleos.append(pct)
+        except OSError:
+            return
+        if nucleos:
+            self.nucleos = nucleos
+
+        # La frecuencia media, para saber si esta acelerada o dormida.
+        # La lista de ficheros se busco una vez: el glob cuesta tanto
+        # como leerlos todos.
+        freqs = []
+        for f in self._freqs:
+            v = _read(f)
+            if v.isdigit():
+                freqs.append(int(v))
+        self.ghz = (sum(freqs) / len(freqs) / 1e6) if freqs else 0.0
+
+    def _memoria(self):
+        total = disponible = 0
+        try:
+            with open("/proc/meminfo") as f:
+                for linea in f:
+                    if linea.startswith("MemTotal:"):
+                        total = int(linea.split()[1]) * 1024
+                    elif linea.startswith("MemAvailable:"):
+                        disponible = int(linea.split()[1]) * 1024
+                        break
+        except OSError:
+            return
+        self.mem_total = total
+        self.mem_usada = max(0, total - disponible)
+
+    # -------------------------------------------------------- ayudas
+
+    @property
+    def mem_frac(self):
+        return (self.mem_usada / self.mem_total) if self.mem_total else 0.0
+
+    @property
+    def temp_cpu(self):
+        return self.temps.get("CPU")
+
+    def acelera(self, rapido):
+        """Un muestreo por segundo mientras se mira el panel, uno cada
+        dos el resto del tiempo. Leer /proc/stat cuesta medio
+        milisegundo, pero despertar al proceso tambien cuenta."""
+        nuevo = 1 if rapido else self.cada
+        if getattr(self, "_periodo", None) == nuevo:
+            return
+        self._periodo = nuevo
+        if self._id is not None:
+            GLib.source_remove(self._id)
+        self._id = GLib.timeout_add_seconds(nuevo, self._tick)
 
 
 # -------------------------------------------------------------- bspwm
