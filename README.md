@@ -792,6 +792,16 @@ De dónde salía:
   los fotogramas que dé la pantalla porque el tirón se ve; un latido de 2,6 s o
   una barra indeterminada se ven igual a 30. El ritmo ahora se ajusta a lo que
   haya vivo.
+- **Cada texto se recomponía en cada fotograma de la animación de abrir.**
+  Mientras la isla crece, el contenido se dibuja **escalado** para que quepa
+  dentro de la forma; y escalar el contexto de cairo le cambia la
+  transformación a Pango, que da la composición por inválida y vuelve a
+  componer el texto entero. Con el calendario abierto son 45 números
+  recompuestos 120 veces por segundo. Ahora, mientras la forma se mueve, el
+  contenido se dibuja **una vez** y lo que se estira es esa copia; al parar se
+  vuelve al árbol, así que lo que se queda en pantalla es nítido y vuelve a
+  grabar sus zonas pulsables. Medido: abrir y cerrar el calendario ocho veces
+  pasó de 1.055 a 375 ticks de CPU.
 - **Una reconstrucción del contenido por cada fila que cruzaba el ratón** —23
   por segundo, medidas—. Solo se rehace en los paneles cuyo contenido depende
   del hover; en los demás el realce lo pinta el rectángulo que se desliza, que

@@ -304,6 +304,14 @@ class Island(Gtk.Window):
         # isla solo se entera para repintar, y solo si hay algo a la
         # vista que lo enseñe.
         self.carga = sources.Carga(self._on_carga)
+        # Lo que se PINTA de la carga no es la ultima muestra, es un
+        # valor que se desliza hacia ella. Se muestrea cada 150 ms con
+        # el panel abierto y cada dos segundos sin el, y saltar de un
+        # valor al siguiente se ve como un tiron por mucho que el dato
+        # sea correcto.
+        self.sp_cpu = Spring(0.0, response=0.30, damping=1.0, escala=0.01)
+        self.carga_cols = []       # por nucleo, suavizado
+        self.carga_barras = []     # las del notch, suavizadas
 
         # Servidor de notificaciones. La isla toma el nombre de D-Bus y
         # recibe los avisos de primera mano: es la unica forma de tener
@@ -936,7 +944,7 @@ class Island(Gtk.Window):
         # forma de dibujar "algo que va pasando": la onda del dictado.
         # Las viejas se apagan hacia la izquierda, asi que ademas se ve
         # de que lado viene el tiempo.
-        row.add(R.Row([R.Wave(self.carga.hist,
+        row.add(R.Row([R.Wave(self.carga_barras,
                               self._color_temp(self.carga.temp_cpu, T.DIM),
                               T.CARGA_N, T.CARGA_BAR_W, T.CARGA_BAR_GAP,
                               T.CARGA_H, T.CARGA_MIN)], tag="carga"))
@@ -1618,7 +1626,36 @@ class Island(Gtk.Window):
     def _gb(n):
         return ("%.1f" % (n / 1073741824.0)).replace(".", ",")
 
-    def _on_carga(self):
+    def _suaviza_carga(self, dt):
+        """Acerca lo pintado a lo medido, y dice si todavia se mueve.
+
+        Replegado no se suaviza nada: se copia el valor y se acabo. No
+        hay un solo pixel que mirar, y lo que se busca aqui es que la
+        animacion no cueste cuando no se ve.
+        """
+        destino = [n / 100.0 for n in self.carga.nucleos]
+        h = list(self.carga.hist)[-T.CARGA_N:]
+        h = [0.0] * max(0, T.CARGA_N - len(h)) + h
+        if self.oculto:
+            self.carga_cols, self.carga_barras = list(destino), list(h)
+            return False
+
+        k = min(1.0, dt * T.CARGA_SUAVE)
+        movio = False
+        for lista, fin in ((self.carga_cols, destino),
+                           (self.carga_barras, h)):
+            if len(lista) != len(fin):
+                lista[:] = list(fin)
+                movio = movio or bool(fin)
+                continue
+            for i, d in enumerate(fin):
+                v = lista[i]
+                if abs(d - v) > 0.004:
+                    lista[i] = v + (d - v) * k
+                    movio = True
+        return movio
+
+    def _on_carga(self, ligero=False):
         """Hay muestra nueva. Solo se mueve lo que haga falta.
 
         Con el panel abierto hay numeros que cambian, asi que se
@@ -1629,6 +1666,15 @@ class Island(Gtk.Window):
         act = self.activities.get("panel")
         abierto = act is not None and act.data.get("which") == "sistema"
         self.carga.acelera(abierto)
+        self.sp_cpu.set(self.carga.cpu / 100.0)
+        if not self.oculto:
+            self.ensure_tick()
+        if ligero:
+            # El muestreo ligero solo mueve barras y numero, y los dos
+            # se leen en vivo al dibujar: reconstruir el panel seis
+            # veces por segundo seria volver a medirlo todo con Pango
+            # para cambiar dos digitos.
+            return
         if abierto:
             if self._dentro:
                 # Mirando el panel: no se cierra debajo de la nariz.
@@ -1655,16 +1701,19 @@ class Island(Gtk.Window):
             R.Gap(T.GAP_ITEM),
             R.Text("CPU", T.F_SUB, T.DIM),
             R.Gap(T.GAP_ITEM),
-            R.Rodillo(self._rodillo("cpu", "%d%%" % round(c.cpu)),
-                      T.F_TITLE, T.FG),
+            # En vivo y en un hueco fijo, no rodando: a seis muestras
+            # por segundo una cifra que rueda no se lee, y ademas
+            # obligaria a reconstruir el panel en cada muestra.
+            R.Cifras(lambda: "%d%%" % round(self.sp_cpu.value * 100),
+                     "100%", T.F_TITLE, T.FG),
         ])
         chispa = R.Chispa(c.hist, T.SIS_CHISPA_W, T.SIS_CHISPA_H, col)
         hueco = max(T.GAP_GROUP, W - izq.size(cr)[0] - T.SIS_CHISPA_W)
         filas = [R.Row([izq, R.Gap(hueco), chispa]),
-                 R.Bar(W, T.SIS_BARRA, c.cpu / 100.0, col, T.SURF_2)]
+                 R.Bar(W, T.SIS_BARRA, self.sp_cpu, col, T.SURF_2)]
 
         # --- una barra por nucleo, y al lado lo que las explica
-        nucleos = R.Columnas([n / 100.0 for n in c.nucleos],
+        nucleos = R.Columnas(self.carga_cols,
                              T.SIS_COL_W, T.SIS_COL_GAP, T.SIS_COL_H, col)
         detalle = R.Row([
             R.Text("%d n\u00facleos" % len(c.nucleos), T.F_SMALL, T.DIM),
@@ -3247,6 +3296,7 @@ class Island(Gtk.Window):
 
     def refresh(self, initial=False):
         self._prof["refresh"] += 1
+        R.begin_frame()
         cr = self._measure_ctx()
         key, mode, item = self.build(cr)
         w, h = item.size(cr)
@@ -3268,6 +3318,10 @@ class Island(Gtk.Window):
             # Cambio de estado: cruza el contenido viejo con el nuevo.
             self.prev_content = self.content
             self._pw = getattr(self, "_cw", 0.0)
+            self._ph = getattr(self, "_ch", 0.0)
+            # La copia ya pintada del saliente sirve tal cual para el
+            # cruce: se hereda en vez de volver a dibujarla.
+            self._tex_prev = getattr(self, "_tex", None)
             # Las zonas del contenido anterior desaparecen con el; dejar
             # el realce vivo lo haria quedarse flotando sobre nada.
             self.hover = None
@@ -3304,6 +3358,8 @@ class Island(Gtk.Window):
         # por segundo de algo que solo cambia cuando cambia el
         # contenido.
         self._cw = w
+        self._ch = h
+        self._tex = None          # la copia se pinta cuando haga falta
 
         if self.activities:
             self._mostrar()
@@ -3527,6 +3583,15 @@ class Island(Gtk.Window):
 
         rapido = moving          # hasta aqui, todo lo que pide monitor
 
+        # El deslizamiento de la carga NO pide la velocidad del
+        # monitor: son barras acercandose a un valor, y a 30 se ven
+        # igual. Puesto antes de esta linea --que es donde estaba- el
+        # panel corria a 90 fotogramas por segundo para esto.
+        if self.sp_cpu.step(dt):
+            moving = True
+        if self._suaviza_carga(dt):
+            moving = True
+
         # Una animacion ciclica no "se asienta" nunca: mientras este en
         # pantalla hay que seguir pidiendo fotogramas.
         if act is not None and act.kind == "power" and act.data.get("charging"):
@@ -3651,6 +3716,7 @@ class Island(Gtk.Window):
         return False
 
     def _dibuja(self, cr):
+        R.begin_frame()
         cr.set_operator(cairo.OPERATOR_SOURCE)
         cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
@@ -3715,11 +3781,23 @@ class Island(Gtk.Window):
         # el cruce se lea como un relevo, no como un parpadeo.
         if self.prev_content is not None and f < 0.999:
             pw = getattr(self, "_pw", 0.0) or self.prev_content.size(cr)[0]
+            ph = getattr(self, "_ph", 0.0)
             cr.save()
             cr.translate(0, -10 * f)
-            self._encaja(cr, pw, x, w, cy)
-            self.prev_content.draw(cr, x + (w - pw) / 2.0, cy, 1.0 - f)
-            cr.restore()
+            k = self._escala_encaje(pw, w)
+            tex = getattr(self, "_tex_prev", None)
+            if self._con_copia(k) and ph > 0:
+                if tex is None:
+                    tex = self._tex_prev = self._copia(self.prev_content,
+                                                       pw, ph)
+                if tex is not None:
+                    self._pinta_copia(cr, tex, x, w, cy, pw, ph, k, 1.0 - f)
+                    cr.restore()
+                    tex = True
+            if tex is not True:
+                self._encaja(cr, pw, x, w, cy)
+                self.prev_content.draw(cr, x + (w - pw) / 2.0, cy, 1.0 - f)
+                cr.restore()
 
         # Las zonas sensibles se reinician aqui, despues de pintar el
         # contenido saliente: si no, durante el cruce quedarian activas
@@ -3728,13 +3806,73 @@ class Island(Gtk.Window):
         R.begin_hits()
         if self.content is not None:
             cw = getattr(self, "_cw", 0.0) or self.content.size(cr)[0]
+            ch = getattr(self, "_ch", 0.0)
+            k = self._escala_encaje(cw, w)
             cr.save()
             cr.translate(0, 10 * (1.0 - f))
-            self._encaja(cr, cw, x, w, cy)
-            self.content.draw(cr, x + (w - cw) / 2.0, cy, f)
+            if self._con_copia(k) and ch > 0:
+                tex = self._tex
+                if tex is None:
+                    tex = self._tex = self._copia(self.content, cw, ch)
+                if tex is not None:
+                    self._pinta_copia(cr, tex, x, w, cy, cw, ch, k, f)
+                else:
+                    self._encaja(cr, cw, x, w, cy)
+                    self.content.draw(cr, x + (w - cw) / 2.0, cy, f)
+            else:
+                self.content.draw(cr, x + (w - cw) / 2.0, cy, f)
             cr.restore()
 
         cr.reset_clip()
+
+    def _copia(self, item, cw, ch):
+        """El contenido ya dibujado, para estirarlo mientras la isla crece.
+
+        Durante el crecimiento el contenido se dibuja ESCALADO para que
+        quepa, y escalar el contexto le cambia la transformacion a
+        Pango: cada texto se vuelve a componer entero en cada
+        fotograma. Medido: abrir y cerrar el calendario --45 numeros-
+        ocho veces costaba 12,7 segundos de CPU, con la isla saturando
+        un nucleo mientras la forma se mueve.
+
+        Pintandolo una vez y estirando la copia, la animacion es una
+        superficie escalada. Al llegar a su tamano se vuelve a dibujar
+        el arbol de verdad, asi que lo que se queda en pantalla es
+        nitido y las zonas pulsables se graban como siempre.
+        """
+        w, h = int(cw) + 2, int(ch) + 2
+        if w < 3 or h < 3:
+            return None
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+        c2 = cairo.Context(surf)
+        R.begin_frame()
+        item.draw(c2, 1.0, h / 2.0, 1.0)
+        surf.flush()
+        # Lo que haya grabado ese dibujado son coordenadas de la copia,
+        # no de la pantalla: fuera.
+        R.begin_hits()
+        R.begin_frame()
+        return surf
+
+    def _escala_encaje(self, ancho_contenido, ancho_isla):
+        """El factor de _encaja, para saber si hace falta la copia."""
+        if ancho_contenido <= 0:
+            return 1.0
+        util = max(0.0, ancho_isla - 2 * T.PAD_PILL)
+        return max(T.ENCAJE_MIN, min(1.0, util / float(ancho_contenido)))
+
+    def _con_copia(self, k):
+        """Si este fotograma se pinta con la copia en vez del arbol.
+
+        Mientras la forma se mueve, SIEMPRE: aunque el contenido ya
+        quepa y no haga falta escalarlo, cada fotograma de la animacion
+        vuelve a recorrer el arbol entero, a medir con Pango y a
+        componer cada texto. Es el gasto gordo de abrir un panel.
+
+        Al parar se vuelve al arbol: lo que se queda en pantalla se
+        dibuja nitido y graba sus zonas pulsables.
+        """
+        return k < 0.999 or not (self.sp_w.settled and self.sp_h.settled)
 
     def _rodillo(self, nombre, texto):
         """El contador de esa cifra, ya puesto al dia."""
@@ -3774,6 +3912,21 @@ class Island(Gtk.Window):
             return bool(km.get_caps_lock_state())
         except Exception:
             return False
+
+    def _pinta_copia(self, cr, tex, x, w, cy, cw, ch, k, a):
+        """La copia, escalada alrededor del centro de la isla."""
+        cx = x + w / 2.0
+        cr.translate(cx, cy)
+        cr.scale(k, k)
+        cr.translate(-cx, -cy)
+        cr.set_source_surface(tex, x + (w - cw) / 2.0 - 1.0,
+                              cy - (int(ch) + 2) / 2.0)
+        # Filtro barato: la copia se encoge mientras la isla crece, y el
+        # filtro bueno de cairo para reducir cuesta bastante mas que el
+        # bilineal para una diferencia que a 120 fotogramas por segundo
+        # nadie llega a ver.
+        cr.get_source().set_filter(cairo.FILTER_BILINEAR)
+        cr.paint_with_alpha(max(0.0, min(1.0, a)))
 
     @staticmethod
     def _encaja(cr, ancho_contenido, x_isla, ancho_isla, cy):
@@ -3859,6 +4012,12 @@ class Island(Gtk.Window):
         return (mejor[1], mejor[2]) if mejor else (None, None)
 
     def on_click(self, widget, ev):
+        if not (self.sp_w.settled and self.sp_h.settled):
+            # Mientras la isla cambia de tamano no hay zonas fiables
+            # --el contenido es una copia estirada- y lo que esta debajo
+            # del dedo se esta moviendo. Se ignora en vez de acertar en
+            # cualquier cosa.
+            return True
         tag, rect = self._hit(ev.x, ev.y)
         self._touch_panel()
         if self._seat is not None:

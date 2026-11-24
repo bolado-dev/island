@@ -170,6 +170,8 @@ class Carga(object):
                                 "scaling_cur_freq")
         self._bat = "/sys/class/power_supply/BAT0/power_now"
         self._vuelta = 0
+        self._ligero = None
+        self._rapido = False
         self.refresh(todo=True)
         self._id = GLib.timeout_add_seconds(cada, self._tick)
 
@@ -231,7 +233,21 @@ class Carga(object):
     def _tick(self):
         self.refresh()
         if self.al_muestrear:
-            self.al_muestrear()
+            self.al_muestrear(False)
+        return True
+
+    def _tick_ligero(self):
+        """Solo el reparto de /proc/stat: 0,02 ms.
+
+        Mientras se mira el panel hace falta un valor nuevo a menudo o
+        las barras van a saltos de un segundo, pero no hace falta
+        volver a preguntar por las temperaturas ni por la frecuencia,
+        que es lo que cuesta. Esto es barato de verdad: a seis veces
+        por segundo son 0,12 ms por segundo de reloj.
+        """
+        self._cpu(largo=False)
+        if self.al_muestrear:
+            self.al_muestrear(True)
         return True
 
     def refresh(self, todo=False):
@@ -255,7 +271,7 @@ class Carga(object):
         except (ValueError, IndexError):
             pass
 
-    def _cpu(self):
+    def _cpu(self, largo=True):
         """Uso por nucleo a partir de /proc/stat.
 
         Un porcentaje de CPU solo existe entre DOS lecturas: lo que hay
@@ -281,13 +297,21 @@ class Carga(object):
                         pct = max(0.0, min(100.0, 100.0 * (dt - docio) / dt))
                     if cual == "cpu":
                         self.cpu = pct
-                        self.hist.append(pct / 100.0)
+                        if largo:
+                            # El historial va al ritmo lento: si
+                            # tambien se alimentase del muestreo
+                            # ligero, los tres minutos de grafica se
+                            # quedarian en quince segundos.
+                            self.hist.append(pct / 100.0)
                     else:
                         nucleos.append(pct)
         except OSError:
             return
         if nucleos:
             self.nucleos = nucleos
+
+        if not largo:
+            return
 
         # La frecuencia media, para saber si esta acelerada o dormida.
         # La lista de ficheros se busco una vez: el glob cuesta tanto
@@ -324,17 +348,22 @@ class Carga(object):
     def temp_cpu(self):
         return self.temps.get("CPU")
 
-    def acelera(self, rapido):
-        """Un muestreo por segundo mientras se mira el panel, uno cada
-        dos el resto del tiempo. Leer /proc/stat cuesta medio
-        milisegundo, pero despertar al proceso tambien cuenta."""
-        nuevo = 1 if rapido else self.cada
-        if getattr(self, "_periodo", None) == nuevo:
+    def acelera(self, rapido, ms=150):
+        """Mientras se mira el panel, dos ritmos a la vez.
+
+        El lento sigue siendo el de siempre --temperaturas, frecuencia,
+        memoria e historial-, y encima se añade uno ligero que solo
+        reparte /proc/stat. Asi el numero y las barras se mueven como
+        algo vivo sin volver a pagar lo caro seis veces por segundo.
+        """
+        if bool(getattr(self, "_rapido", False)) == bool(rapido):
             return
-        self._periodo = nuevo
-        if self._id is not None:
-            GLib.source_remove(self._id)
-        self._id = GLib.timeout_add_seconds(nuevo, self._tick)
+        self._rapido = bool(rapido)
+        if self._ligero is not None:
+            GLib.source_remove(self._ligero)
+            self._ligero = None
+        if rapido:
+            self._ligero = GLib.timeout_add(ms, self._tick_ligero)
 
 
 # -------------------------------------------------------------- bspwm

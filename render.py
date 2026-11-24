@@ -45,6 +45,21 @@ _LAYOUT_MAX = 256
 _hits = []
 
 
+# Numero de vuelta de dibujado. Medir un arbol cuesta: una fila pide el
+# tamano de cada hijo para colocarlo, una pila pide el de cada fila para
+# centrarla, y eso se repetia ENTERO en cada fotograma aunque nada
+# hubiera cambiado. Con el numero de vuelta, cada elemento se mide una
+# vez por vuelta y las demas veces devuelve lo que ya sabe; y como la
+# vuelta cambia, lo que si cambia de tamano --una cifra rodando, un
+# campo de texto- se sigue midiendo cuando toca.
+_vuelta = 0
+
+
+def begin_frame():
+    global _vuelta
+    _vuelta += 1
+
+
 def begin_hits():
     del _hits[:]
 
@@ -139,8 +154,11 @@ class Text(object):
         return self._layout
 
     def size(self, cr):
+        if getattr(self, '_v', None) == _vuelta:
+            return self._sz
         w, h = self.layout(cr).get_pixel_size()
-        return w, h
+        self._v, self._sz = _vuelta, (w, h)
+        return self._sz
 
     def draw(self, cr, x, cy, a):
         l = self.layout(cr)
@@ -473,13 +491,16 @@ class Row(object):
         return self
 
     def size(self, cr):
+        if getattr(self, '_v', None) == _vuelta:
+            return self._sz
         w = 0
         h = 0
         for it in self.items:
             iw, ih = it.size(cr)
             w += iw
             h = max(h, ih)
-        return w, h
+        self._v, self._sz = _vuelta, (w, h)
+        return self._sz
 
     def draw(self, cr, x, cy, a):
         if self.tag:
@@ -497,13 +518,16 @@ class Stack(object):
         self.rows, self.gap, self.center = rows, gap, center
 
     def size(self, cr):
+        if getattr(self, '_v', None) == _vuelta:
+            return self._sz
         w = 0
         h = -self.gap
         for r in self.rows:
             rw, rh = r.size(cr)
             w = max(w, rw)
             h += rh + self.gap
-        return w, h
+        self._v, self._sz = _vuelta, (w, h)
+        return self._sz
 
     def draw(self, cr, x, cy, a):
         tw, th = self.size(cr)
@@ -561,36 +585,60 @@ class Chispa(object):
     def __init__(self, valores, w, h, color, alfa=0.30):
         self.valores, self.w, self.h = valores, w, h
         self.color, self.alfa = color, alfa
+        self._tex = None
+        self._pts = None
 
     def size(self, cr):
         return self.w, self.h
 
     def draw(self, cr, x, cy, a):
-        vals = list(self.valores)
-        if len(vals) < 2:
+        vals = self.valores
+        n = len(vals)
+        if n < 2:
             return
-        y0 = cy + self.h / 2.0
-        paso = self.w / float(len(vals) - 1)
-        cr.save()
-        cr.move_to(x, y0)
-        for i, v in enumerate(vals):
-            v = max(0.0, min(1.0, v))
-            cr.line_to(x + i * paso, y0 - v * self.h)
-        cr.line_to(x + self.w, y0)
-        cr.close_path()
-        cr.set_source_rgba(*self.color, self.alfa * a)
-        cr.fill()
+        # Un punto por cada cuatro pixeles como mucho. Con noventa
+        # muestras en doscientos pixeles, la mitad caen encima de otro
+        # y lo unico que hacen es alargar el trazado -- y cada line_to
+        # es una llamada desde Python, que es lo que de verdad cuesta
+        # aqui: medido, 0,9 ms por fotograma antes de esto.
+        paso_i = max(1, int(round(n / max(2.0, self.w / 4.0))))
+        pts = tuple(max(0.0, min(1.0, v)) for v in list(vals)[::paso_i])
 
-        # La linea de arriba, mas viva que el relleno: es la que se
-        # sigue con la vista.
-        cr.move_to(x, y0 - max(0.0, min(1.0, vals[0])) * self.h)
-        for i, v in enumerate(vals):
-            cr.line_to(x + i * paso, y0 - max(0.0, min(1.0, v)) * self.h)
-        cr.set_source_rgba(*self.color, a)
+        # La grafica se guarda dibujada. Los datos cambian una vez cada
+        # dos segundos y la isla repinta treinta veces por segundo: sin
+        # esto se vuelve a trazar la misma curva sesenta veces por cada
+        # vez que de verdad cambia algo. Comparar los puntos cuesta
+        # microsegundos; trazarla, medio milisegundo.
+        if pts != self._pts or self._tex is None:
+            self._pts = pts
+            self._tex = self._pinta(pts)
+        cr.save()
+        cr.set_source_surface(self._tex, x, cy - self.h / 2.0)
+        cr.paint_with_alpha(a)
+        cr.restore()
+
+    def _pinta(self, pts):
+        """El trazado se construye UNA vez: se traza la linea
+        conservandolo, se le cierran los bajos y se rellena. Antes se
+        recorrian los puntos dos veces, una por cada cosa."""
+        w, h = int(self.w), int(self.h)
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+        cr = cairo.Context(surf)
+        dx = self.w / float(len(pts) - 1) if len(pts) > 1 else self.w
+        cr.move_to(0, h - pts[0] * h)
+        for i, v in enumerate(pts):
+            cr.line_to(i * dx, h - v * h)
+        cr.set_source_rgba(*self.color, 1.0)
         cr.set_line_width(1.6)
         cr.set_line_join(cairo.LINE_JOIN_ROUND)
-        cr.stroke()
-        cr.restore()
+        cr.stroke_preserve()
+        cr.line_to((len(pts) - 1) * dx, h)
+        cr.line_to(0, h)
+        cr.close_path()
+        cr.set_source_rgba(*self.color, self.alfa)
+        cr.fill()
+        surf.flush()
+        return surf
 
 
 class Columnas(object):

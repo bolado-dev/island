@@ -661,3 +661,9 @@ MS_LENTO = 33
 # no se reconstruye al moverlo: su realce lo pinta el rectangulo que se
 # desliza, que lee sus muelles en vivo.
 PANELES_HOVER = ("launcher", "emoji", "portapapeles", "battery")
+
+# Con que rapidez lo pintado alcanza a lo medido. Es una persecucion
+# por segundo, no por fotograma: a 8 el valor nuevo esta puesto en algo
+# menos de medio segundo, que es justo lo que tarda en llegar el
+# siguiente con el panel abierto.
+CARGA_SUAVE = 8.0
